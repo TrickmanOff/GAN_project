@@ -1,3 +1,5 @@
+from typing import Tuple
+
 import torch
 import torchvision
 from torch import nn
@@ -31,7 +33,7 @@ class LinearTransform(nn.Module):
 
 
 class ExtractIndicesDataset:
-    def __init__(self, dataset, indices: tuple[int]):
+    def __init__(self, dataset, indices: Tuple[int]):
         self.dataset = dataset
         self.indices = indices
 

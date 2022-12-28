@@ -1,7 +1,8 @@
 """Знает об устройстве директорий и именах файлов"""
-import torch
-
 import os
+from typing import Optional
+
+import torch
 
 from device import get_local_device
 
@@ -14,7 +15,7 @@ class ModelDir:
         self.checkpoint_filepath = os.path.join(model_dirpath, checkpoint_filename)
         self.model_state_filepath = os.path.join(model_dirpath, model_state_filename)
 
-    def get_checkpoint_state(self) -> dict | None:
+    def get_checkpoint_state(self) -> Optional[dict]:
         if not os.path.exists(self.checkpoint_filepath):
             return None
         checkpoint = torch.load(self.checkpoint_filepath, map_location=get_local_device())

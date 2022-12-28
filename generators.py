@@ -1,3 +1,5 @@
+from typing import Tuple
+
 import numpy as np
 import torch
 from torch import nn
@@ -40,7 +42,7 @@ class MNISTGenerator(nn.Module):
 
 
 class SimpleImageGenerator(nn.Module):
-    def __init__(self, noise_dim: int, output_shape: tuple[int, ...]):
+    def __init__(self, noise_dim: int, output_shape: Tuple[int, ...]):
         super().__init__()
         output_len = int(np.prod(output_shape))
         hidden_neurons = (noise_dim + output_len) // 2

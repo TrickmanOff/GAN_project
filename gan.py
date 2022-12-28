@@ -1,4 +1,4 @@
-from typing import Callable
+from typing import Callable, Dict, Any
 
 import torch
 from torch import nn
@@ -19,13 +19,13 @@ class GAN(nn.Module):
         noise = noise or self.gen_noise(1)
         return self.generator(noise)
 
-    def state_dict(self, **kwargs) -> dict[str]:
+    def state_dict(self, **kwargs) -> Dict[str, Any]:
         return {
             'generator': self.generator.state_dict(),
             'discriminator': self.discriminator.state_dict()
         }
 
-    def load_state_dict(self, state_dict: dict[str], strict: bool = True) -> None:
+    def load_state_dict(self, state_dict: Dict[str, Any], strict: bool = True) -> None:
         self.generator.load_state_dict(state_dict['generator'])
         self.discriminator.load_state_dict(state_dict['discriminator'])
 

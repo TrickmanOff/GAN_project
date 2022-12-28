@@ -1,8 +1,10 @@
+from typing import Tuple
+
 import torch
 from torch import nn
 
 
-def save_dimensions_padding(kernel_size: tuple[int, int]) -> tuple[int, int]:
+def save_dimensions_padding(kernel_size: Tuple[int, int]) -> Tuple[int, int]:
     """
     works only for odd kernel size values
     returns padding size such that the output has the same coordinate dimensions

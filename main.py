@@ -1,4 +1,4 @@
-import typing as tp
+from typing import Tuple, Generator, Optional
 
 import torch
 
@@ -6,7 +6,7 @@ import data
 from discriminators import SimpleImageDiscriminator, MNISTDiscriminator
 from gan import GAN
 from generators import SimpleImageGenerator, MNISTGenerator
-from logger import StreamLogger
+from logger import Logger, StreamHandler
 from storage import ExperimentsStorage
 from train import Stepper, WganEpochTrainer, GanTrainer
 
@@ -24,8 +24,23 @@ def init_storage() -> ExperimentsStorage:
 experiments_storage = init_storage()
 
 
-def form_gan_trainer(model_name: str, gan_model: GAN | None = None, n_epochs: int = 100) -> tp.Generator[tuple[int, GAN], None, GAN]:
-    logger = StreamLogger()
+def init_logger() -> Logger:
+    handlers = {
+        'config': StreamHandler(),
+        'epoch': StreamHandler(),
+        # 'batch': StreamHandler(),
+    }
+    logger = Logger()
+    for level, handler in handlers.items():
+        logger.add_handler(level, handler)
+    return logger
+
+
+def form_gan_trainer(model_name: str, gan_model: Optional[GAN] = None, n_epochs: int = 100) -> Generator[Tuple[int, GAN], None, GAN]:
+    """
+    :return: a generator that yields (epoch number, gan_model after this epoch)
+    """
+    logger = init_logger()
     dataset = data.get_mnist_dataset()
 
     noise_dimension = 50
@@ -60,10 +75,19 @@ def form_gan_trainer(model_name: str, gan_model: GAN | None = None, n_epochs: in
     return train_gan_generator
 
 
+def call_generator(generator):
+    """Like 'yield from' but doesn't make the current function a generator"""
+    while True:
+        try:
+            generator.send(None)
+        except StopIteration as exc:
+            return exc.value
+
+
 def main():
     model_name = 'mnist_test'
     gan_trainer = form_gan_trainer(model_name=model_name, n_epochs=100)
-    gan_model = yield from gan_trainer
+    gan_model = call_generator(gan_trainer)
     # do sth with gan model
 
 

@@ -1,4 +1,4 @@
-import typing as tp
+from typing import Tuple, Generator, Dict, Any, Optional
 from abc import ABC, abstractmethod
 
 import torch
@@ -35,7 +35,7 @@ class Stepper:
         if self.scheduler is not None and self.scheduler_mode == 'epoch':
             self.scheduler.step(*args, **kwargs)
 
-    def state_dict(self) -> dict[str]:
+    def state_dict(self) -> Dict[str, Any]:
         state_dict = {
             'optimizer': self.optimizer.state_dict(),
         }
@@ -43,7 +43,7 @@ class Stepper:
             state_dict['scheduler'] = self.scheduler.state_dict()
         return state_dict
 
-    def load_state_dict(self, state_dict: dict[str]) -> None:
+    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
         self.optimizer.load_state_dict(state_dict['optimizer'])
         if self.scheduler is not None:
             self.scheduler.load_state_dict(state_dict['scheduler'])
@@ -54,7 +54,7 @@ class GanEpochTrainer(ABC):
     @abstractmethod
     def train_epoch(self, gan_model: GAN, dataset: torch.utils.data.Dataset,
                     generator_stepper: Stepper, critic_stepper: Stepper,
-                    logger: Logger | None = None) -> None:
+                    logger: Optional[Logger] = None) -> None:
         pass
 
 
@@ -71,7 +71,7 @@ class WganEpochTrainer(GanEpochTrainer):
 
     def train_epoch(self, gan_model: GAN, dataset: torch.utils.data.Dataset,
                     generator_stepper: Stepper, critic_stepper: Stepper,
-                    logger: Logger | None = None) -> None:
+                    logger: Optional[Logger] = None) -> None:
         sampler = torch.utils.data.sampler.RandomSampler(dataset, replacement=True)
         random_sampler = torch.utils.data.sampler.BatchSampler(sampler, batch_size=self.batch_size,
                                                                drop_last=False)
@@ -85,10 +85,10 @@ class WganEpochTrainer(GanEpochTrainer):
         for t, real_batch in enumerate(dataloader):
             if t == self.n_critic:
                 break
-            real_batch.to(get_local_device())
+            real_batch = real_batch.to(get_local_device())
             noise_batch = gan_model.gen_noise(self.batch_size).to(get_local_device())
 
-            gen_batch = gan_model.generator(noise_batch)
+            gen_batch = gan_model.generator(noise_batch).to(get_local_device())
 
             loss = - (gan_model.discriminator(real_batch) - gan_model.discriminator(
                 gen_batch)).mean()
@@ -105,9 +105,9 @@ class WganEpochTrainer(GanEpochTrainer):
             self._clip_model(gan_model.discriminator)
 
         # generator training
-        noise_batch = gan_model.gen_noise(self.batch_size)
-        gen_batch = gan_model.generator(noise_batch)
-        real_batch = next(iter(dataloader))
+        noise_batch = gan_model.gen_noise(self.batch_size).to(get_local_device())
+        gen_batch = gan_model.generator(noise_batch).to(get_local_device())
+        real_batch = next(iter(dataloader)).to(get_local_device())
 
         was_loss_approx = (
                     gan_model.discriminator(real_batch) - gan_model.discriminator(gen_batch)).mean()
@@ -133,7 +133,7 @@ class GanTrainer:
               generator_stepper: Stepper, critic_stepper: Stepper,
               epoch_trainer: GanEpochTrainer,
               n_epochs: int = 100,
-              logger: Logger | None = None) -> tp.Generator[tuple[int, GAN], None, GAN]:
+              logger: Optional[Logger] = None) -> Generator[Tuple[int, GAN], None, GAN]:
 
         gan_model.to(get_local_device())
 
