@@ -27,7 +27,7 @@ experiments_storage = init_storage()
 def init_logger() -> Logger:
     handlers = {
         'config': StreamHandler(),
-        'epoch': StreamHandler(),
+        # 'epoch': StreamHandler(),
         # 'batch': StreamHandler(),
     }
     logger = Logger()
@@ -40,16 +40,18 @@ def form_gan_trainer(model_name: str, gan_model: Optional[GAN] = None, n_epochs:
     """
     :return: a generator that yields (epoch number, gan_model after this epoch)
     """
+    classes_cnt = 10
+
     logger = init_logger()
-    dataset = data.get_mnist_dataset()
+    dataset = data.get_mnist_dataset(keep_labels=True)
 
     noise_dimension = 50
 
     def uniform_noise_generator(n: int) -> torch.Tensor:
         return 2*torch.rand(size=(n, noise_dimension)) - 1  # [-1, 1]
 
-    generator = MNISTGenerator(noise_dim=noise_dimension)
-    discriminator = MNISTDiscriminator()
+    generator = MNISTGenerator(noise_dim=noise_dimension, condition_classes_cnt=classes_cnt)
+    discriminator = MNISTDiscriminator(condition_classes_cnt=classes_cnt)
 
     if gan_model is None:
         gan_model = GAN(generator, discriminator, uniform_noise_generator)

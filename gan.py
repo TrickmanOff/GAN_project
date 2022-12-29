@@ -3,9 +3,12 @@ from typing import Callable, Dict, Any
 import torch
 from torch import nn
 
+from generators import Generator
+from discriminators import Discriminator
+
 
 class GAN(nn.Module):
-    def __init__(self, generator: nn.Module, discriminator: nn.Module,
+    def __init__(self, generator: Generator, discriminator: Discriminator,
                  noise_generator: Callable[[int], torch.Tensor]) -> None:
         super().__init__()
         self.generator = generator

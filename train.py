@@ -75,23 +75,39 @@ class WganEpochTrainer(GanEpochTrainer):
         sampler = torch.utils.data.sampler.RandomSampler(dataset, replacement=True)
         random_sampler = torch.utils.data.sampler.BatchSampler(sampler, batch_size=self.batch_size,
                                                                drop_last=False)
+        def collate_fn(els_list: list):
+            if isinstance(els_list[0], tuple):  # x, y
+                return torch.stack([el[0] for el in els_list]), torch.Tensor([el[1] for el in els_list])
+            else:
+                return torch.stack(els_list)
         dataloader = torch.utils.data.DataLoader(dataset, batch_sampler=random_sampler,
-                                                 collate_fn=lambda b_list: torch.stack([el[0] for el in b_list]))  # можно, наверное, переписать проще
+                                                 collate_fn=collate_fn)
 
         # weight-clipping
         self._clip_model(gan_model.discriminator)
 
+        def get_batches() -> Tuple[torch.Tensor, torch.Tensor, Any, Any]:
+            """Look at the return statement"""
+            real_batch = next(iter(dataloader))
+            if isinstance(real_batch, tuple):
+                assert len(real_batch) == 2
+                real_batch_x, real_batch_y = real_batch
+                real_batch_x = real_batch_x.to(get_local_device())
+                real_batch_y = real_batch_y.to(get_local_device())
+            else:
+                real_batch_x, real_batch_y = real_batch.to(get_local_device()), None
+            gen_batch_y = real_batch_y
+            noise_batch_z = gan_model.gen_noise(self.batch_size).to(get_local_device())
+            gen_batch_x = gan_model.generator(noise_batch_z, gen_batch_y).to(get_local_device())
+
+            return gen_batch_x, real_batch_x, gen_batch_y, real_batch_y
+
         # critic training
-        for t, real_batch in enumerate(dataloader):
-            if t == self.n_critic:
-                break
-            real_batch = real_batch.to(get_local_device())
-            noise_batch = gan_model.gen_noise(self.batch_size).to(get_local_device())
+        for t in range(self.n_critic):
+            gen_batch_x, real_batch_x, gen_batch_y, real_batch_y = get_batches()
 
-            gen_batch = gan_model.generator(noise_batch).to(get_local_device())
-
-            loss = - (gan_model.discriminator(real_batch) - gan_model.discriminator(
-                gen_batch)).mean()
+            loss = - (gan_model.discriminator(real_batch_x, real_batch_y) -
+                      gan_model.discriminator(gen_batch_x, gen_batch_y)).mean()
             if logger is not None:
                 logger.log(level='batch', module='train/discriminator',
                            msg={'batch_num': t + 1, 'wasserstein dist estimation': -loss.item()})
@@ -105,12 +121,10 @@ class WganEpochTrainer(GanEpochTrainer):
             self._clip_model(gan_model.discriminator)
 
         # generator training
-        noise_batch = gan_model.gen_noise(self.batch_size).to(get_local_device())
-        gen_batch = gan_model.generator(noise_batch).to(get_local_device())
-        real_batch = next(iter(dataloader)).to(get_local_device())
+        gen_batch_x, real_batch_x, gen_batch_y, real_batch_y = get_batches()
 
-        was_loss_approx = (
-                    gan_model.discriminator(real_batch) - gan_model.discriminator(gen_batch)).mean()
+        was_loss_approx = (gan_model.discriminator(real_batch_x, real_batch_y) -
+                           gan_model.discriminator(gen_batch_x, gen_batch_y)).mean()
         was_loss_approx.backward()
         generator_stepper.step()
         generator_stepper.optimizer.zero_grad()

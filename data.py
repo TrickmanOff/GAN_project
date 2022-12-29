@@ -1,9 +1,16 @@
-from typing import Tuple
+from typing import Tuple, List, Optional, Union
 
 import torch
 import torchvision
 from torch import nn
 from torchvision import transforms
+
+
+"""
+Датасеты могут быть двух типов:
+1. Элемент - объект, не являющийся tuple. В этом случае элемент рассматривается как x в GAN
+2. Элемент - tuple длины 2. В этом случае 1-ый элемент tuple - x, 2-й - y (условие)
+"""
 
 
 class LinearTransform(nn.Module):
@@ -33,7 +40,7 @@ class LinearTransform(nn.Module):
 
 
 class ExtractIndicesDataset:
-    def __init__(self, dataset, indices: Tuple[int]):
+    def __init__(self, dataset, indices: Union[Tuple[int], int]):
         self.dataset = dataset
         self.indices = indices
 
@@ -42,7 +49,10 @@ class ExtractIndicesDataset:
 
     def __getitem__(self, n: int):
         obj = self.dataset[n]
-        return tuple(obj[i] for i in self.indices)
+        if isinstance(self.indices, int):
+            return obj[self.indices]
+        else:
+            return tuple(obj[i] for i in self.indices)
 
 
 def get_default_image_transform(dim: int) -> transforms.Compose:
@@ -56,17 +66,30 @@ def get_default_image_transform(dim: int) -> transforms.Compose:
 default_image_transform = get_default_image_transform(3)
 
 
-def get_cifar_10_dataset(root='./cifar10'):
+def get_cifar_10_dataset(root='./cifar10', keep_labels: bool = True, kept_labels: Optional[List[int]] = None):
+    """
+    :param labels: which labels to keep
+    """
     cifar_dataset = torchvision.datasets.CIFAR10(root=root, train=True, download=True,
                                                  transform=default_image_transform, )
 
-    dataset = ExtractIndicesDataset(cifar_dataset, indices=(0,))
-    return dataset
+    if kept_labels is not None:
+        kept_indices = []
+        for i in range(len(cifar_dataset)):
+            if cifar_dataset[i][1] in kept_labels:
+                kept_indices.append(i)
+
+        cifar_dataset = torch.utils.data.Subset(cifar_dataset, kept_indices)
+
+    if not keep_labels:
+        cifar_dataset = ExtractIndicesDataset(cifar_dataset, indices=0)
+    return cifar_dataset
 
 
-def get_mnist_dataset(root='./mnist'):
+def get_mnist_dataset(root='./mnist', keep_labels: bool = True):
     mnist_dataset = torchvision.datasets.MNIST(root=root, train=True, download=True,
                                                transform=get_default_image_transform(1))
 
-    dataset = ExtractIndicesDataset(mnist_dataset, indices=(0,))
-    return dataset
+    if not keep_labels:
+        mnist_dataset = ExtractIndicesDataset(mnist_dataset, indices=0)
+    return mnist_dataset
