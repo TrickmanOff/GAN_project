@@ -39,9 +39,11 @@ class MNISTDiscriminator(Discriminator):
         super().__init__()
         self.condition_classes_cnt = condition_classes_cnt
 
-        y_out = 256  # размерность вектора, в который переводится y (ohe)
+        y_out = 0
+        if condition_classes_cnt != 0:
+            y_out = 256  # размерность вектора, в который переводится y (ohe)
+            self.y_transform = nn.Linear(in_features=condition_classes_cnt, out_features=y_out)
 
-        self.y_transform = nn.Linear(in_features=condition_classes_cnt, out_features=y_out)
         self.x_to_vector = nn.Sequential(
             nn.Conv2d(in_channels=1, out_channels=64, kernel_size=3, stride=3, padding=1),
             nn.LeakyReLU(),

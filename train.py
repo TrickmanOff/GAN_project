@@ -8,6 +8,7 @@ from torch import optim
 from device import get_local_device
 from gan import GAN
 from logger import Logger
+from normalization import update_normalizers_stats
 from storage import ModelDir
 
 
@@ -59,15 +60,9 @@ class GanEpochTrainer(ABC):
 
 
 class WganEpochTrainer(GanEpochTrainer):
-    def __init__(self, n_critic: int = 5, batch_size: int = 64, clip_c: float = 0.01) -> None:
+    def __init__(self, n_critic: int = 5, batch_size: int = 64) -> None:
         self.n_critic = n_critic
         self.batch_size = batch_size
-        self.clip_c = clip_c
-
-    def _clip_model(self, model: nn.Module) -> None:
-        with torch.no_grad():
-            for param in model.parameters():
-                param.clip_(min=-self.clip_c, max=self.clip_c)
 
     def train_epoch(self, gan_model: GAN, dataset: torch.utils.data.Dataset,
                     generator_stepper: Stepper, critic_stepper: Stepper,
@@ -82,9 +77,6 @@ class WganEpochTrainer(GanEpochTrainer):
                 return torch.stack(els_list)
         dataloader = torch.utils.data.DataLoader(dataset, batch_sampler=random_sampler,
                                                  collate_fn=collate_fn)
-
-        # weight-clipping
-        self._clip_model(gan_model.discriminator)
 
         def get_batches() -> Tuple[torch.Tensor, torch.Tensor, Any, Any]:
             """Look at the return statement"""
@@ -116,9 +108,7 @@ class WganEpochTrainer(GanEpochTrainer):
             critic_stepper.step()
             critic_stepper.optimizer.zero_grad()
             generator_stepper.optimizer.zero_grad()
-
-            # weight-clipping
-            self._clip_model(gan_model.discriminator)
+            update_normalizers_stats(gan_model.discriminator)
 
         # generator training
         gen_batch_x, real_batch_x, gen_batch_y, real_batch_y = get_batches()

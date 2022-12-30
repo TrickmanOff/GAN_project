@@ -34,11 +34,17 @@ class MNISTGenerator(Generator):
 
         conv_channels = 512
         base_width = 3
-        y_out = 1000     # размерность вектора, в который переводится y (ohe)
-        noise_out = 200
 
-        self.noise_transform = nn.Linear(in_features=noise_dim, out_features=noise_out)
-        self.y_transform = nn.Linear(in_features=condition_classes_cnt, out_features=y_out)
+        if condition_classes_cnt != 0:
+            y_out = 1000  # размерность вектора, в который переводится y (ohe)
+            noise_out = 200
+
+            self.noise_transform = nn.Linear(in_features=noise_dim, out_features=noise_out)
+            self.y_transform = nn.Linear(in_features=condition_classes_cnt, out_features=y_out)
+        else:
+            self.noise_transform = nn.Identity()
+            y_out = 0
+            noise_out = noise_dim
 
         self.model = nn.Sequential(
             nn.Linear(in_features=noise_out + y_out,

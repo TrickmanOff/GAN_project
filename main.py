@@ -7,6 +7,7 @@ from discriminators import SimpleImageDiscriminator, MNISTDiscriminator
 from gan import GAN
 from generators import SimpleImageGenerator, MNISTGenerator
 from logger import Logger, StreamHandler
+from normalization import apply_normalization, ClippingNormalizer, SpectralNormalizer
 from storage import ExperimentsStorage
 from train import Stepper, WganEpochTrainer, GanTrainer
 
@@ -43,15 +44,16 @@ def form_gan_trainer(model_name: str, gan_model: Optional[GAN] = None, n_epochs:
     classes_cnt = 10
 
     logger = init_logger()
-    dataset = data.get_mnist_dataset(keep_labels=True)
+    dataset = data.get_mnist_dataset(keep_labels=False)
 
     noise_dimension = 50
 
     def uniform_noise_generator(n: int) -> torch.Tensor:
         return 2*torch.rand(size=(n, noise_dimension)) - 1  # [-1, 1]
 
-    generator = MNISTGenerator(noise_dim=noise_dimension, condition_classes_cnt=classes_cnt)
-    discriminator = MNISTDiscriminator(condition_classes_cnt=classes_cnt)
+    generator = MNISTGenerator(noise_dim=noise_dimension)
+    discriminator = MNISTDiscriminator()
+    discriminator = apply_normalization(discriminator, SpectralNormalizer)
 
     if gan_model is None:
         gan_model = GAN(generator, discriminator, uniform_noise_generator)
@@ -64,7 +66,7 @@ def form_gan_trainer(model_name: str, gan_model: Optional[GAN] = None, n_epochs:
         optimizer=torch.optim.RMSprop(discriminator.parameters(), lr=1e-5)
     )
 
-    epoch_trainer = WganEpochTrainer(n_critic=5, batch_size=64, clip_c=0.01)
+    epoch_trainer = WganEpochTrainer(n_critic=5, batch_size=64)
 
     model_dir = experiments_storage.get_model_dir(model_name)
     trainer = GanTrainer(model_dir=model_dir, use_saved_checkpoint=True)
