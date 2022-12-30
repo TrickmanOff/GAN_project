@@ -5,6 +5,7 @@ import torch
 from torch import nn
 from torch import optim
 
+from data import collate_fn, move_batch_to
 from device import get_local_device
 from gan import GAN
 from logger import Logger
@@ -70,24 +71,19 @@ class WganEpochTrainer(GanEpochTrainer):
         sampler = torch.utils.data.sampler.RandomSampler(dataset, replacement=True)
         random_sampler = torch.utils.data.sampler.BatchSampler(sampler, batch_size=self.batch_size,
                                                                drop_last=False)
-        def collate_fn(els_list: list):
-            if isinstance(els_list[0], tuple):  # x, y
-                return torch.stack([el[0] for el in els_list]), torch.Tensor([el[1] for el in els_list])
-            else:
-                return torch.stack(els_list)
+        
         dataloader = torch.utils.data.DataLoader(dataset, batch_sampler=random_sampler,
                                                  collate_fn=collate_fn)
 
         def get_batches() -> Tuple[torch.Tensor, torch.Tensor, Any, Any]:
             """Look at the return statement"""
             real_batch = next(iter(dataloader))
+            real_batch = move_batch_to(real_batch, get_local_device())
             if isinstance(real_batch, tuple):
                 assert len(real_batch) == 2
                 real_batch_x, real_batch_y = real_batch
-                real_batch_x = real_batch_x.to(get_local_device())
-                real_batch_y = real_batch_y.to(get_local_device())
             else:
-                real_batch_x, real_batch_y = real_batch.to(get_local_device()), None
+                real_batch_x, real_batch_y = real_batch, None
             gen_batch_y = real_batch_y
             noise_batch_z = gan_model.gen_noise(self.batch_size).to(get_local_device())
             gen_batch_x = gan_model.generator(noise_batch_z, gen_batch_y).to(get_local_device())
@@ -97,7 +93,6 @@ class WganEpochTrainer(GanEpochTrainer):
         # critic training
         for t in range(self.n_critic):
             gen_batch_x, real_batch_x, gen_batch_y, real_batch_y = get_batches()
-
             loss = - (gan_model.discriminator(real_batch_x, real_batch_y) -
                       gan_model.discriminator(gen_batch_x, gen_batch_y)).mean()
             if logger is not None:
@@ -127,10 +122,10 @@ class WganEpochTrainer(GanEpochTrainer):
 
 # знает, что нужно для обучения GAN
 class GanTrainer:
-    def __init__(self, model_dir: ModelDir, save_checkpoint: bool = True,
+    def __init__(self, model_dir: ModelDir, save_checkpoint_once_in_epoch: int = 1,
                  use_saved_checkpoint: bool = True) -> None:
         self.model_dir = model_dir
-        self.save_checkpoint = save_checkpoint
+        self.save_checkpoint_once_in_epoch = save_checkpoint_once_in_epoch
         self.use_saved_checkpoint = use_saved_checkpoint
 
     def train(self, dataset: torch.utils.data.Dataset, gan_model: GAN,
@@ -163,7 +158,7 @@ class GanTrainer:
             logger.flush(level='epoch')
             epoch += 1
 
-            if self.save_checkpoint:
+            if self.save_checkpoint_once_in_epoch != 0 and epoch % self.save_checkpoint_once_in_epoch == 0:
                 checkpoint = {
                     'epoch': epoch,
                     'gan': gan_model.state_dict(),

@@ -1,5 +1,6 @@
 from typing import Tuple, List, Optional, Union
 
+import numpy as np
 import torch
 import torchvision
 from torch import nn
@@ -8,9 +9,27 @@ from torchvision import transforms
 
 """
 Датасеты могут быть двух типов:
-1. Элемент - объект, не являющийся tuple. В этом случае элемент рассматривается как x в GAN
+1. Элемент - число или тензор. В этом случае элемент рассматривается как x в GAN
 2. Элемент - tuple длины 2. В этом случае 1-ый элемент tuple - x, 2-й - y (условие)
+y - либо число, либо тензор, либо tuple с числами/тензорами
 """
+
+def collate_fn(els_list: List[Union[Tuple, int, torch.Tensor]]):
+    if isinstance(els_list[0], tuple):
+        return tuple(collate_fn(list(a)) for a in zip(*els_list))
+    elif isinstance(els_list[0], int):
+        return torch.Tensor(els_list)
+    elif isinstance(els_list[0], torch.Tensor):
+        return torch.stack(els_list)
+    else:
+        raise RuntimeError
+
+
+def move_batch_to(batch, device):
+    if isinstance(batch, tuple):
+        return tuple(move_batch_to(subbatch, device) for subbatch in batch)
+    else:
+        return batch.to(device)
 
 
 class LinearTransform(nn.Module):
@@ -93,3 +112,35 @@ def get_mnist_dataset(root='./mnist', keep_labels: bool = True):
     if not keep_labels:
         mnist_dataset = ExtractIndicesDataset(mnist_dataset, indices=0)
     return mnist_dataset
+
+
+class PhysicsDataset(torch.utils.data.Dataset):
+    """
+    one element: (energy deposit, (point, momentum))
+    """
+    def __init__(self, energy: torch.Tensor, point: torch.Tensor, momentum: torch.Tensor) -> None:
+        self.energy = energy
+        self.point = point
+        self.momentum = momentum
+
+    def __getitem__(self, idx: int) -> tuple:
+        return (self.energy[idx], (self.point[idx], self.momentum[idx]))
+
+    def __len__(self) -> int:
+        return self.energy.shape[0]
+
+
+def get_physics_dataset(path: str) -> torch.utils.data.Dataset:
+    data_train = np.load(path)
+
+    np.random.seed(42)
+    ind_arr = np.random.choice(np.arange(len(data_train['EnergyDeposit'])),
+                               size=len(data_train['EnergyDeposit']) // 2)
+    #     energy   = torch.tensor(data_train['EnergyDeposit'][ind_arr].reshape(-1, 900)).float()
+    energy = torch.tensor(data_train['EnergyDeposit'][ind_arr]).float()
+    energy = torch.log1p(energy)  # !
+    energy = torch.permute(energy, dims=(0, 3, 1, 2))
+    point = torch.tensor(data_train['ParticlePoint'][:, :2][ind_arr]).float()
+    momentum = torch.tensor(data_train['ParticleMomentum'][ind_arr]).float()
+
+    return PhysicsDataset(energy, point, momentum)

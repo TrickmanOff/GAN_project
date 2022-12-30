@@ -103,3 +103,48 @@ class SimpleImageGenerator(Generator):
         x = self.model(z)
         batch_size = z.shape[0]
         return x.reshape(batch_size, *self.output_shape)
+
+
+class SimplePhysicsGenerator(Generator):
+    def __init__(self, noise_dim: int):
+        super().__init__()
+        
+        point_dim = 2
+        momentum_dim = 3
+        
+        in_matr_dim = 10
+        
+        self.noise_to_matr = nn.Sequential(
+            nn.Linear(in_features=noise_dim, out_features=in_matr_dim**2),
+            nn.Unflatten(1, unflattened_size=(1, in_matr_dim, in_matr_dim))
+        )
+        
+        self.point_to_matr = nn.Sequential(
+            nn.Linear(in_features=point_dim, out_features=in_matr_dim**2),
+            nn.Unflatten(1, unflattened_size=(1, in_matr_dim, in_matr_dim))
+        )
+        
+        self.momentum_to_matr = nn.Sequential(
+            nn.Linear(in_features=momentum_dim, out_features=in_matr_dim**2),
+            nn.Unflatten(1, unflattened_size=(1, in_matr_dim, in_matr_dim))
+        )
+        
+        # 3 x 10 x 10
+        self.tensor_transform = nn.Sequential(
+            nn.ConvTranspose2d(in_channels=3, out_channels=5, kernel_size=4, stride=2, padding=1),  # 5 x 20 x 20
+            nn.ReLU(),
+            nn.ConvTranspose2d(in_channels=5, out_channels=10, kernel_size=4, stride=2, padding=6),  # 10 x 30 x 30
+            nn.ReLU(),
+            nn.ConvTranspose2d(in_channels=10, out_channels=1, kernel_size=1),  # 1 x 30 x 30
+        )
+        
+    def forward(self, z: torch.Tensor, y) -> torch.Tensor:
+        point, momentum = y
+        
+        noise_matr = self.noise_to_matr(z)
+        point_matr = self.point_to_matr(point)
+        momentum_matr = self.momentum_to_matr(momentum)
+        stacked_matrs = torch.concat([noise_matr, point_matr, momentum_matr], dim=1)
+        in_tensor = nn.ReLU()(stacked_matrs)
+        res = self.tensor_transform(in_tensor)
+        return res

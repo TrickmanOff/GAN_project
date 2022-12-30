@@ -105,3 +105,48 @@ class SimpleImageDiscriminator(Discriminator):  # for (1 x 28 x 28) images
         backbone_out = self.backbone_end(backbone_seq_out)
         out = self.head(backbone_out)
         return out
+
+
+class SimplePhysicsDiscriminator(Discriminator):
+    def __init__(self):
+        super().__init__()
+        
+#         energy_dim = 30
+        point_dim = 2
+        momentum_dim = 3
+        in_matr_dim = 15
+        
+        self.x_transform = nn.AvgPool2d(kernel_size=2)
+        
+        self.point_to_matr = nn.Sequential(
+            nn.Linear(in_features=point_dim, out_features=in_matr_dim**2),
+            nn.Unflatten(1, unflattened_size=(1, in_matr_dim, in_matr_dim))
+        )
+        
+        self.momentum_to_matr = nn.Sequential(
+            nn.Linear(in_features=momentum_dim, out_features=in_matr_dim**2),
+            nn.Unflatten(1, unflattened_size=(1, in_matr_dim, in_matr_dim))
+        )
+        
+        self.tensor_transform = nn.Sequential(  # 3 x 15 x 15
+            nn.Conv2d(in_channels=3, out_channels=5, kernel_size=4),  # 5 x 12 x 12
+            nn.ReLU(),
+            nn.Conv2d(in_channels=5, out_channels=10, kernel_size=4, dilation=2), # 5 x 6 x 6,
+            nn.ReLU(),
+            nn.AvgPool2d(kernel_size=6)
+        )
+        # 10
+        self.head = nn.Linear(in_features=10, out_features=1)
+        
+    def forward(self, x: torch.Tensor, y):
+        point, momentum = y
+        x_matr = self.x_transform(x)
+        point_matr = self.point_to_matr(point)
+        momentum_matr = self.momentum_to_matr(momentum)
+        stacked_matrs = torch.concat([x_matr, point_matr, momentum_matr], dim=1)
+        in_tensor = nn.ReLU()(stacked_matrs)
+        
+        res = self.tensor_transform(in_tensor)
+        res = res.reshape((res.shape[0], -1))
+        c = self.head(res)
+        return c

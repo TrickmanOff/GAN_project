@@ -3,9 +3,9 @@ from typing import Tuple, Generator, Optional
 import torch
 
 import data
-from discriminators import SimpleImageDiscriminator, MNISTDiscriminator
+from discriminators import SimpleImageDiscriminator, MNISTDiscriminator, SimplePhysicsDiscriminator
 from gan import GAN
-from generators import SimpleImageGenerator, MNISTGenerator
+from generators import SimpleImageGenerator, MNISTGenerator, SimplePhysicsGenerator
 from logger import Logger, StreamHandler
 from normalization import apply_normalization, ClippingNormalizer, SpectralNormalizer
 from storage import ExperimentsStorage
@@ -28,7 +28,7 @@ experiments_storage = init_storage()
 def init_logger() -> Logger:
     handlers = {
         'config': StreamHandler(),
-        # 'epoch': StreamHandler(),
+        'epoch': StreamHandler(),
         # 'batch': StreamHandler(),
     }
     logger = Logger()
@@ -41,35 +41,36 @@ def form_gan_trainer(model_name: str, gan_model: Optional[GAN] = None, n_epochs:
     """
     :return: a generator that yields (epoch number, gan_model after this epoch)
     """
-    classes_cnt = 10
+    # classes_cnt = 10
 
     logger = init_logger()
-    dataset = data.get_mnist_dataset(keep_labels=False)
+    # dataset = data.get_physics_dataset('/kaggle/input/physics-gan/caloGAN_case11_5D_120K.npz')
+    dataset = data.get_physics_dataset('../caloGAN_case11_5D_120K.npz')
 
     noise_dimension = 50
 
     def uniform_noise_generator(n: int) -> torch.Tensor:
         return 2*torch.rand(size=(n, noise_dimension)) - 1  # [-1, 1]
 
-    generator = MNISTGenerator(noise_dim=noise_dimension)
-    discriminator = MNISTDiscriminator()
+    generator = SimplePhysicsGenerator(noise_dim=noise_dimension)
+    discriminator = SimplePhysicsDiscriminator()
     discriminator = apply_normalization(discriminator, SpectralNormalizer)
 
     if gan_model is None:
         gan_model = GAN(generator, discriminator, uniform_noise_generator)
 
     generator_stepper = Stepper(
-        optimizer=torch.optim.RMSprop(generator.parameters(), lr=1e-3)
+        optimizer=torch.optim.RMSprop(generator.parameters(), lr=1e-5)
     )
 
     discriminator_stepper = Stepper(
         optimizer=torch.optim.RMSprop(discriminator.parameters(), lr=1e-5)
     )
 
-    epoch_trainer = WganEpochTrainer(n_critic=5, batch_size=64)
+    epoch_trainer = WganEpochTrainer(n_critic=10, batch_size=64)
 
     model_dir = experiments_storage.get_model_dir(model_name)
-    trainer = GanTrainer(model_dir=model_dir, use_saved_checkpoint=True)
+    trainer = GanTrainer(model_dir=model_dir, use_saved_checkpoint=True, save_checkpoint_once_in_epoch=500)
     train_gan_generator = trainer.train(dataset=dataset, gan_model=gan_model,
                                         generator_stepper=generator_stepper,
                                         critic_stepper=discriminator_stepper,
