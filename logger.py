@@ -1,3 +1,5 @@
+import wandb
+
 import io
 import sys
 from abc import abstractmethod
@@ -23,6 +25,41 @@ class StreamHandler(Handler):
             if isinstance(val, float):
                 val = round(val, 5)
             print(' '*margin + name + ':', val, file=self._stream)
+
+
+class _WandbHandler(Handler):
+    """
+    Should be used through WandbHandlerCM
+    """
+    def __init__(self) -> None:
+        super().__init__()
+        wandb.define_metric('epoch_num')
+
+    def flush(self, module: str, msg: dict) -> None:
+        for key in msg:
+            wandb.define_metric(module + '/' + key, step_metric='epoch_num')
+        logged_dict = {module + '/' + key: value for key, value in msg.items() if key != 'epoch_num'}
+        if 'epoch_num' in msg:
+            logged_dict['epoch_num'] = msg['epoch_num']
+        wandb.log(logged_dict)
+
+
+class WandbHandlerCM:
+    def __init__(self, project_name: str, experiment_id: str, token: str) -> None:
+        self.project_name = project_name
+        self.experiment_id = experiment_id
+        self.token = token
+
+    def __enter__(self) -> Handler:
+        wandb.login(key=self.token)
+        wandb.init(
+            project=self.project_name,
+            name=self.experiment_id
+        )
+        return _WandbHandler()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        wandb.finish()
 
 
 class Logger:

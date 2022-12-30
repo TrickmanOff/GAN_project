@@ -1,3 +1,6 @@
+import contextlib
+import os
+from enum import Enum, auto
 from typing import Tuple, Generator, Optional
 
 import torch
@@ -6,7 +9,7 @@ import data
 from discriminators import SimpleImageDiscriminator, MNISTDiscriminator, SimplePhysicsDiscriminator
 from gan import GAN
 from generators import SimpleImageGenerator, MNISTGenerator, SimplePhysicsGenerator
-from logger import Logger, StreamHandler
+from logger import Logger, StreamHandler, WandbHandlerCM
 from normalization import apply_normalization, ClippingNormalizer, SpectralNormalizer
 from storage import ExperimentsStorage
 from train import Stepper, WganEpochTrainer, GanTrainer
@@ -25,25 +28,48 @@ def init_storage() -> ExperimentsStorage:
 experiments_storage = init_storage()
 
 
-def init_logger() -> Logger:
-    handlers = {
-        'config': StreamHandler(),
-        'epoch': StreamHandler(),
-        # 'batch': StreamHandler(),
-    }
-    logger = Logger()
-    for level, handler in handlers.items():
-        logger.add_handler(level, handler)
-    return logger
+class Environment(Enum):
+    LOCAL = auto()
+    KAGGLE = auto()
+
+
+ENV = Environment.LOCAL
+
+
+def get_wandb_token() -> str:
+    if ENV is Environment.LOCAL:
+        return os.getenv('WANDB_TOKEN')
+    elif ENV is Environment.KAGGLE:
+        from kaggle_secrets import UserSecretsClient
+        return UserSecretsClient().get_secret('WANDB_TOKEN')
+
+
+def init_logger(model_name: str = ''):
+    @contextlib.contextmanager
+    def logger_cm():
+        try:
+            with WandbHandlerCM(project_name='GANs', experiment_id=model_name, token=get_wandb_token()) as wandb_handler:
+                handlers = {
+                    'config': StreamHandler(),
+                    'epoch': wandb_handler,
+                    # 'epoch': StreamHandler(),
+                    # 'batch': StreamHandler(),
+                }
+                logger = Logger()
+                for level, handler in handlers.items():
+                    logger.add_handler(level, handler)
+                yield logger
+        finally:
+            pass
+    return logger_cm
 
 
 def form_gan_trainer(model_name: str, gan_model: Optional[GAN] = None, n_epochs: int = 100) -> Generator[Tuple[int, GAN], None, GAN]:
     """
     :return: a generator that yields (epoch number, gan_model after this epoch)
     """
+    logger_cm_fn = init_logger(model_name)
     # classes_cnt = 10
-
-    logger = init_logger()
     # dataset = data.get_physics_dataset('/kaggle/input/physics-gan/caloGAN_case11_5D_120K.npz')
     dataset = data.get_physics_dataset('../caloGAN_case11_5D_120K.npz')
 
@@ -67,7 +93,7 @@ def form_gan_trainer(model_name: str, gan_model: Optional[GAN] = None, n_epochs:
         optimizer=torch.optim.RMSprop(discriminator.parameters(), lr=1e-5)
     )
 
-    epoch_trainer = WganEpochTrainer(n_critic=10, batch_size=64)
+    epoch_trainer = WganEpochTrainer(n_critic=20, batch_size=64)
 
     model_dir = experiments_storage.get_model_dir(model_name)
     trainer = GanTrainer(model_dir=model_dir, use_saved_checkpoint=True, save_checkpoint_once_in_epoch=500)
@@ -76,7 +102,7 @@ def form_gan_trainer(model_name: str, gan_model: Optional[GAN] = None, n_epochs:
                                         critic_stepper=discriminator_stepper,
                                         epoch_trainer=epoch_trainer,
                                         n_epochs=n_epochs,
-                                        logger=logger)
+                                        logger_cm_fn=logger_cm_fn)
     return train_gan_generator
 
 

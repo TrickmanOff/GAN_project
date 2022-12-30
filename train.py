@@ -1,4 +1,5 @@
-from typing import Tuple, Generator, Dict, Any, Optional
+import contextlib
+from typing import Tuple, Generator, Dict, Any, Optional, ContextManager, Callable
 from abc import ABC, abstractmethod
 
 import torch
@@ -132,7 +133,7 @@ class GanTrainer:
               generator_stepper: Stepper, critic_stepper: Stepper,
               epoch_trainer: GanEpochTrainer,
               n_epochs: int = 100,
-              logger: Optional[Logger] = None) -> Generator[Tuple[int, GAN], None, GAN]:
+              logger_cm_fn: Optional[Callable[[], ContextManager[Logger]]] = None) -> Generator[Tuple[int, GAN], None, GAN]:
 
         gan_model.to(get_local_device())
 
@@ -147,26 +148,28 @@ class GanTrainer:
                 generator_stepper.load_state_dict(checkpoint['generator_stepper'])
                 critic_stepper.load_state_dict(checkpoint['critic_stepper'])
 
-        while epoch <= n_epochs:
-            if logger is not None:
-                logger.log(level='epoch', module='train', msg={'epoch_num': epoch})
+        logger_cm = logger_cm_fn() or contextlib.nullcontext(None)
+        with logger_cm as logger:
+            while epoch <= n_epochs:
+                if logger is not None:
+                    logger.log(level='epoch', module='train/generator', msg={'epoch_num': epoch})
 
-            epoch_trainer.train_epoch(gan_model=gan_model, dataset=dataset,
-                                      generator_stepper=generator_stepper, critic_stepper=critic_stepper,
-                                      logger=logger)
+                epoch_trainer.train_epoch(gan_model=gan_model, dataset=dataset,
+                                          generator_stepper=generator_stepper, critic_stepper=critic_stepper,
+                                          logger=logger)
 
-            logger.flush(level='epoch')
-            epoch += 1
+                logger.flush(level='epoch')
+                epoch += 1
 
-            if self.save_checkpoint_once_in_epoch != 0 and epoch % self.save_checkpoint_once_in_epoch == 0:
-                checkpoint = {
-                    'epoch': epoch,
-                    'gan': gan_model.state_dict(),
-                    'generator_stepper': generator_stepper.state_dict(),
-                    'critic_stepper': critic_stepper.state_dict()
-                }
-                self.model_dir.save_checkpoint_state(checkpoint)
+                if self.save_checkpoint_once_in_epoch != 0 and epoch % self.save_checkpoint_once_in_epoch == 0:
+                    checkpoint = {
+                        'epoch': epoch,
+                        'gan': gan_model.state_dict(),
+                        'generator_stepper': generator_stepper.state_dict(),
+                        'critic_stepper': critic_stepper.state_dict()
+                    }
+                    self.model_dir.save_checkpoint_state(checkpoint)
 
-            yield epoch, gan_model
+                yield epoch, gan_model
 
-        return gan_model
+            return gan_model
