@@ -41,8 +41,9 @@ class MNISTDiscriminator(Discriminator):
 
         y_out = 0
         if condition_classes_cnt != 0:
-            y_out = 256  # размерность вектора, в который переводится y (ohe)
-            self.y_transform = nn.Linear(in_features=condition_classes_cnt, out_features=y_out)
+            y_out = 10  # размерность вектора, в который переводится y (ohe)
+            self.y_transform = nn.Identity()
+            # self.y_transform = nn.Linear(in_features=condition_classes_cnt, out_features=y_out)
 
         self.x_to_vector = nn.Sequential(
             nn.Conv2d(in_channels=1, out_channels=64, kernel_size=3, stride=3, padding=1),
@@ -69,6 +70,38 @@ class MNISTDiscriminator(Discriminator):
             x_vec = torch.concat((x_vec, y_vec), dim=1)
 
         return self.fc(x_vec)
+
+
+class MlpMnistDiscriminator(Discriminator):
+    def __init__(self, condition_classes_cnt: int = 0):
+        super().__init__()
+        self.condition_classes_cnt = condition_classes_cnt
+
+        mlp_in_len = 28*28
+        if self.condition_classes_cnt != 0:
+            class_embedding_len = 10
+            self.embeddings = nn.Embedding(condition_classes_cnt, class_embedding_len)
+            mlp_in_len += class_embedding_len
+
+        self.mlp = nn.Sequential(
+            nn.Linear(794, 1024),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Dropout(0.3),
+            nn.Linear(1024, 512),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Dropout(0.3),
+            nn.Linear(512, 256),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Dropout(0.3),
+            nn.Linear(256, 1),
+        )
+
+    def forward(self, x: torch.Tensor, y: Any = None) -> torch.Tensor:
+        x = x.reshape(x.shape[0], 28*28)
+        if y is not None:
+            y_embed = self.embeddings(y.long())
+            x = torch.concat([x, y_embed], dim=1)
+        return self.mlp(x)
 
 
 class SimpleImageDiscriminator(Discriminator):  # for (1 x 28 x 28) images

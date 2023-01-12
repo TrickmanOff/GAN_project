@@ -36,16 +36,19 @@ class MNISTGenerator(Generator):
         base_width = 3
 
         if condition_classes_cnt != 0:
-            y_out = 1000  # размерность вектора, в который переводится y (ohe)
-            noise_out = 200
+            y_out = 10  # размерность вектора, в который переводится y (ohe)
+            noise_out = 50
 
-            self.noise_transform = nn.Linear(in_features=noise_dim, out_features=noise_out)
-            self.y_transform = nn.Linear(in_features=condition_classes_cnt, out_features=y_out)
+            # self.noise_transform = nn.Linear(in_features=noise_dim, out_features=noise_out)
+            self.noise_transform = nn.Identity()
+            # self.y_transform = nn.Linear(in_features=condition_classes_cnt, out_features=y_out)
+            self.y_transform = nn.Identity()
         else:
             self.noise_transform = nn.Identity()
             y_out = 0
             noise_out = noise_dim
 
+        # 1 x (noise_out + y_out) -> 28 x 28
         self.model = nn.Sequential(
             nn.Linear(in_features=noise_out + y_out,
                       out_features=base_width * base_width * conv_channels),
@@ -83,6 +86,37 @@ class MNISTGenerator(Generator):
             z = torch.concat((z, y_trans), dim=1)
         x = self.model(z)
         return x
+
+
+# taken from https://github.com/arturml/mnist-cgan/blob/master/mnist-cgan.ipynb
+class MlpMnistGenerator(Generator):
+    def __init__(self, noise_dim: int, condition_classes_cnt: int = 0):
+        super().__init__()
+        self.condition_classes_cnt = condition_classes_cnt
+
+        mlp_in_len = noise_dim
+        if condition_classes_cnt != 0:
+            class_embedding_len = 10
+            self.embeddings = nn.Embedding(condition_classes_cnt, class_embedding_len)
+            mlp_in_len += class_embedding_len
+
+        self.mlp = nn.Sequential(
+            nn.Linear(in_features=mlp_in_len, out_features=256),
+            nn.LeakyReLU(0.2),
+            nn.Linear(in_features=256, out_features=512),
+            nn.LeakyReLU(0.2),
+            nn.Linear(in_features=512, out_features=1024),
+            nn.LeakyReLU(0.2),
+            nn.Linear(in_features=1024, out_features=28*28),
+        )
+
+    def forward(self, z: torch.Tensor, y: Any = None) -> torch.Tensor:
+        if y is not None:
+            y_embed = self.embeddings(y.long())
+            z = torch.concat([z, y_embed], dim=1)
+        res = self.mlp(z)
+        batch_size = res.shape[0]
+        return res.reshape(batch_size, 1, 28, 28)
 
 
 class SimpleImageGenerator(Generator):
