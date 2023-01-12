@@ -92,6 +92,7 @@ class WganEpochTrainer(GanEpochTrainer):
             return gen_batch_x, real_batch_x, gen_batch_y, real_batch_y
 
         # critic training
+        gan_model.generator.requires_grad_(False)
         for t in range(self.n_critic):
             gen_batch_x, real_batch_x, gen_batch_y, real_batch_y = get_batches()
             loss = - (gan_model.discriminator(real_batch_x, real_batch_y) -
@@ -103,10 +104,11 @@ class WganEpochTrainer(GanEpochTrainer):
             loss.backward()
             critic_stepper.step()
             critic_stepper.optimizer.zero_grad()
-            generator_stepper.optimizer.zero_grad()
             update_normalizers_stats(gan_model.discriminator)
+        gan_model.generator.requires_grad_(True)
 
         # generator training
+        gan_model.discriminator.requires_grad_(False)
         gen_batch_x, real_batch_x, gen_batch_y, real_batch_y = get_batches()
 
         was_loss_approx = (gan_model.discriminator(real_batch_x, real_batch_y) -
@@ -114,7 +116,7 @@ class WganEpochTrainer(GanEpochTrainer):
         was_loss_approx.backward()
         generator_stepper.step()
         generator_stepper.optimizer.zero_grad()
-        critic_stepper.optimizer.zero_grad()
+        gan_model.discriminator.requires_grad_(True)
 
         if logger is not None:
             logger.log(level='epoch', module='train/generator',
