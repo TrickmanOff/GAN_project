@@ -3,6 +3,7 @@ from typing import Tuple, Any, Optional
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch import nn
 
 import aux
@@ -166,10 +167,13 @@ class SimplePhysicsGenerator(Generator):
         # 3 x 10 x 10
         self.tensor_transform = nn.Sequential(
             nn.ConvTranspose2d(in_channels=3, out_channels=5, kernel_size=4, stride=2, padding=1),  # 5 x 20 x 20
+            nn.BatchNorm2d(num_features=5),
             nn.ReLU(),
             nn.ConvTranspose2d(in_channels=5, out_channels=10, kernel_size=4, stride=2, padding=6),  # 10 x 30 x 30
+            nn.BatchNorm2d(num_features=10),
             nn.ReLU(),
-            nn.ConvTranspose2d(in_channels=10, out_channels=1, kernel_size=1),  # 1 x 30 x 30
+            nn.Conv2d(in_channels=10, out_channels=1, kernel_size=1),  # 1 x 30 x 30
+            nn.ReLU(),
         )
         
     def forward(self, z: torch.Tensor, y) -> torch.Tensor:
@@ -182,3 +186,53 @@ class SimplePhysicsGenerator(Generator):
         in_tensor = nn.ReLU()(stacked_matrs)
         res = self.tensor_transform(in_tensor)
         return res
+
+
+class CaloganPhysicsGenerator(Generator):
+    def __init__(self, noise_dim, act_func=F.relu):
+        super().__init__()
+        self.noise_dim = noise_dim
+        self.activation = act_func
+
+        # 128 + 5 -> (+reshape) 128 x 2 x 2
+        self.fc1 = nn.Linear(self.noise_dim + 5, self.noise_dim * 2 * 2)
+
+        # Z x 2 x 2
+        self.conv1 = nn.ConvTranspose2d(self.noise_dim, 128, 3, stride=2, padding=1, output_padding=1)
+        # 128 x 8 x 8
+        self.conv2 = nn.ConvTranspose2d(128, 64, 3, stride=2, padding=1, output_padding=1)
+        # 64 x 16 x 16
+        self.conv3 = nn.ConvTranspose2d(64, 32, 3, stride=2, padding=1, output_padding=1)
+        # 32 x 32 x 32
+        self.conv4 = nn.ConvTranspose2d(32, 1, 3, stride=2, padding=1, output_padding=1)
+        # 1 x 32 x 32
+        # crop
+        # 1 x 30 x 30
+
+        self.bn1 = nn.BatchNorm2d(128)
+        self.bn2 = nn.BatchNorm2d(64)
+        self.bn3 = nn.BatchNorm2d(32)
+
+    def forward(self, z: torch.Tensor, y) -> torch.Tensor:
+        point, momentum = y
+
+        x = torch.cat([z, momentum, point], dim=1)
+        # print(x.shape)
+        x = F.leaky_relu(self.fc1(x))
+
+        # print(x.shape)
+        EnergyDeposit = x.view(-1, self.noise_dim, 2, 2)
+
+        # print(EnergyDeposit.shape)
+        EnergyDeposit = self.activation(self.bn1(self.conv1(EnergyDeposit)))
+        # print(EnergyDeposit.shape)
+        EnergyDeposit = self.activation(self.bn2(self.conv2(EnergyDeposit)))
+        # print(EnergyDeposit.shape)
+        EnergyDeposit = self.activation(self.bn3(self.conv3(EnergyDeposit)))
+        # print(EnergyDeposit.shape)
+        EnergyDeposit = self.activation(self.conv4(EnergyDeposit))
+        # print(EnergyDeposit.shape)
+        EnergyDeposit = EnergyDeposit[:, :, 1:31, 1:31]
+        # print(EnergyDeposit.shape)
+
+        return EnergyDeposit

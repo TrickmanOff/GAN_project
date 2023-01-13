@@ -2,6 +2,7 @@ from abc import abstractmethod
 from typing import Tuple, Any
 
 import torch
+import torch.nn.functional as F
 from torch import nn
 
 import aux
@@ -147,9 +148,19 @@ class SimplePhysicsDiscriminator(Discriminator):
 #         energy_dim = 30
         point_dim = 2
         momentum_dim = 3
-        in_matr_dim = 15
+        in_matr_dim = 10
         
-        self.x_transform = nn.AvgPool2d(kernel_size=2)
+        self.x_transform = nn.Sequential(  # 1x28x28 -> 5x10x10
+            nn.Conv2d(in_channels=1, out_channels=3, kernel_size=3),
+            nn.BatchNorm2d(num_features=3),
+            nn.ReLU(),
+            nn.Conv2d(in_channels=3, out_channels=5, kernel_size=3, stride=2),
+            nn.BatchNorm2d(num_features=5),
+            nn.ReLU(),
+            nn.Conv2d(in_channels=5, out_channels=5, kernel_size=4, stride=1),
+            nn.BatchNorm2d(num_features=5),
+            nn.ReLU(),
+        )
         
         self.point_to_matr = nn.Sequential(
             nn.Linear(in_features=point_dim, out_features=in_matr_dim**2),
@@ -161,15 +172,16 @@ class SimplePhysicsDiscriminator(Discriminator):
             nn.Unflatten(1, unflattened_size=(1, in_matr_dim, in_matr_dim))
         )
         
-        self.tensor_transform = nn.Sequential(  # 3 x 15 x 15
-            nn.Conv2d(in_channels=3, out_channels=5, kernel_size=4),  # 5 x 12 x 12
+        self.tensor_transform = nn.Sequential(  # 7x10x10
+            nn.Conv2d(in_channels=7, out_channels=10, kernel_size=4),  # 10x7x7
+            nn.BatchNorm2d(num_features=10),
             nn.ReLU(),
-            nn.Conv2d(in_channels=5, out_channels=10, kernel_size=4, dilation=2), # 5 x 6 x 6,
+            nn.Conv2d(in_channels=10, out_channels=15, kernel_size=4, dilation=2),  # 15x1x1
             nn.ReLU(),
-            nn.AvgPool2d(kernel_size=6)
+            nn.Flatten(),
         )
-        # 10
-        self.head = nn.Linear(in_features=10, out_features=1)
+        # 15
+        self.head = nn.Linear(in_features=15, out_features=1)
         
     def forward(self, x: torch.Tensor, y):
         point, momentum = y
@@ -183,3 +195,51 @@ class SimplePhysicsDiscriminator(Discriminator):
         res = res.reshape((res.shape[0], -1))
         c = self.head(res)
         return c
+
+
+class CaloganPhysicsDiscriminator(Discriminator):
+    def __init__(self, act_func=F.leaky_relu):
+        super().__init__()
+        self.activation = act_func
+
+        # 30x30x1 -> 32x32x1 (padding)
+        # 32x32x1
+        self.conv1 = nn.Conv2d(1, 32, 3, stride=2, padding=1)
+        # 16x16x32
+        self.conv2 = nn.Conv2d(32, 64, 3, stride=2, padding=0)
+        # 8x8x64
+        self.conv3 = nn.Conv2d(64, 128, 3, stride=2, padding=0)
+        # 4x4x128
+        self.conv4 = nn.Conv2d(128, 256, 3, stride=2, padding=0)
+        # 2x2x256
+        self.conv5 = nn.Conv2d(256, 256, 3, stride=2, padding=0)
+        # 1x1x256
+
+        self.fc1 = nn.Linear(256 + 5, 64)
+        self.fc2 = nn.Linear(64, 32)
+        self.fc3 = nn.Linear(32, 1)
+
+    def forward(self, EnergyDeposit, y):
+        point, momentum = y
+
+        # print(EnergyDeposit.shape)
+        X = self.activation(self.conv1(EnergyDeposit))
+        # print(X.shape)
+        X = self.activation(self.conv2(X))
+        # print(X.shape)
+        X = self.activation(self.conv3(X))
+        # print(X.shape)
+        X = self.activation(self.conv4(X))
+        # print(X.shape)
+
+        X = X.reshape(-1, 256)
+        # print(X.shape)
+        X = torch.cat([X, momentum, point], dim=1)
+        # print(X.shape)
+
+        X = F.leaky_relu(self.fc1(X))
+        # print(X.shape)
+        X = F.leaky_relu(self.fc2(X))
+        # print(X.shape)
+
+        return self.fc3(X)
