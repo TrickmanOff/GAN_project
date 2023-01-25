@@ -1,7 +1,9 @@
 from copy import copy
-from typing import Dict, Any, Set, Optional
+from typing import Dict, Any, Set, Optional, Iterable
 
+import numpy as np
 import wandb
+from scipy.stats import gaussian_kde
 
 from logger import GANLogger, LoggerConfig
 
@@ -21,6 +23,27 @@ class _WandbLogger(GANLogger):
         logged_dict = copy(data)
         logged_dict[period] = period_index
         wandb.log(logged_dict)
+
+    def log_critic_values_distribution(self, critic_values_true: Iterable[float],
+                                       critic_values_gen: Iterable[float],
+                                       period: str, period_index: int) -> None:
+        kernel_true = gaussian_kde(critic_values_true)
+        kernel_gen = gaussian_kde(critic_values_gen)
+
+        min_val = min(min(critic_values_true), min(critic_values_gen))
+        max_val = max(max(critic_values_true), max(critic_values_gen))
+        min_val -= 0.1
+        max_val += 1
+
+        xs = np.linspace(min_val, max_val, num=25)
+        ys_true = kernel_true(xs)
+        ys_gen = kernel_gen(xs)
+        wandb.log({f'critic_values_plot': wandb.plot.line_series(
+                  xs=xs,
+                  ys=[ys_true, ys_gen],
+                  keys=['true', 'generated'],
+                  title=f'Critic values distributions {period}#{period_index}',
+                  xname='critic value')})
 
 
 class WandbCM:

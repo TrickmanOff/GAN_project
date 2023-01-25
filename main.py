@@ -10,10 +10,11 @@ import logger
 from discriminators import SimpleImageDiscriminator, MNISTDiscriminator, SimplePhysicsDiscriminator
 from gan import GAN
 from generators import SimpleImageGenerator, MNISTGenerator, SimplePhysicsGenerator
-from wandb_logger import WandbCM
+from metrics import CriticValuesDistributionMetric, Metric
 from normalization import apply_normalization, ClippingNormalizer, SpectralNormalizer
 from storage import ExperimentsStorage
 from train import Stepper, WganEpochTrainer, GanTrainer
+from wandb_logger import WandbCM
 
 
 def init_storage() -> ExperimentsStorage:
@@ -57,11 +58,16 @@ def init_logger(model_name: str = ''):
     return logger_cm
 
 
+def form_metric() -> Metric:
+    return CriticValuesDistributionMetric(values_cnt=1000)
+
+
 def form_gan_trainer(model_name: str, gan_model: Optional[GAN] = None, n_epochs: int = 100) -> Generator[Tuple[int, GAN], None, GAN]:
     """
     :return: a generator that yields (epoch number, gan_model after this epoch)
     """
     logger_cm_fn = init_logger(model_name)
+    metric = form_metric()
     # classes_cnt = 10
     # dataset = data.get_physics_dataset('/kaggle/input/physics-gan/caloGAN_case11_5D_120K.npz')
     dataset = data.get_physics_dataset('../caloGAN_case11_5D_120K.npz')
@@ -95,6 +101,7 @@ def form_gan_trainer(model_name: str, gan_model: Optional[GAN] = None, n_epochs:
                                         critic_stepper=discriminator_stepper,
                                         epoch_trainer=epoch_trainer,
                                         n_epochs=n_epochs,
+                                        metric=metric,
                                         logger_cm_fn=logger_cm_fn)
     return train_gan_generator
 

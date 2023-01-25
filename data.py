@@ -1,7 +1,8 @@
-from typing import Tuple, List, Optional, Union
+from typing import Tuple, List, Optional, Union, Any
 
 import numpy as np
 import torch
+import torch.utils.data
 import torchvision
 from torch import nn
 from torchvision import transforms
@@ -12,7 +13,11 @@ from torchvision import transforms
 1. Элемент - число или тензор. В этом случае элемент рассматривается как x в GAN
 2. Элемент - tuple длины 2. В этом случае 1-ый элемент tuple - x, 2-й - y (условие)
 y - либо число, либо тензор, либо tuple с числами/тензорами
+
+Обёртка в виде UnifiedDatasetWrapper приводит оба типа датасетов ко 2-му (для датасета 1-го типа y = None).
+Обёртку следует использовать пользователю.
 """
+
 
 def collate_fn(els_list: List[Union[Tuple, int, torch.Tensor]]):
     if isinstance(els_list[0], tuple):
@@ -58,7 +63,7 @@ class LinearTransform(nn.Module):
         return y
 
 
-class ExtractIndicesDataset:
+class ExtractIndicesDataset(torch.utils.data.Dataset):
     def __init__(self, dataset, indices: Union[Tuple[int], int]):
         self.dataset = dataset
         self.indices = indices
@@ -74,6 +79,26 @@ class ExtractIndicesDataset:
             return tuple(obj[i] for i in self.indices)
 
 
+class UnifiedDatasetWrapper(torch.utils.data.Dataset):
+    """
+    Обёртка для поддержки датасетов обоих типов
+    """
+    def __init__(self, dataset: torch.utils.data.Dataset):
+        self.dataset = dataset
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+    def __getitem__(self, n: int) -> Tuple[Any, Any]:
+        element = self.dataset[n]
+        if isinstance(element, tuple):
+            assert len(element) == 2
+            x, y = element
+        else:
+            x, y = element, None
+        return x, y
+
+
 def get_default_image_transform(dim: int) -> transforms.Compose:
     return transforms.Compose([
         transforms.ToTensor(),
@@ -87,7 +112,7 @@ default_image_transform = get_default_image_transform(3)
 
 def get_cifar_10_dataset(root='./cifar10', keep_labels: bool = True, kept_labels: Optional[List[int]] = None):
     """
-    :param labels: which labels to keep
+    :param kept_labels: images with which labels should be used
     """
     cifar_dataset = torchvision.datasets.CIFAR10(root=root, train=True, download=True,
                                                  transform=default_image_transform, )

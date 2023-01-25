@@ -3,13 +3,16 @@ from typing import Tuple, Generator, Dict, Any, Optional, ContextManager, Callab
 from abc import ABC, abstractmethod
 
 import torch
+import torch.utils.data
 from torch import nn
 from torch import optim
 
 from data import collate_fn, move_batch_to
 from device import get_local_device
 from gan import GAN
-from logger import Logger
+from logger import GANLogger
+from metrics import Metric
+from metrics_logging import log_metric
 from normalization import update_normalizers_stats
 from storage import ModelDir
 
@@ -57,7 +60,7 @@ class GanEpochTrainer(ABC):
     @abstractmethod
     def train_epoch(self, gan_model: GAN, dataset: torch.utils.data.Dataset,
                     generator_stepper: Stepper, critic_stepper: Stepper,
-                    logger: Optional[Logger] = None) -> None:
+                    logger: Optional[GANLogger] = None) -> None:
         pass
 
 
@@ -68,23 +71,17 @@ class WganEpochTrainer(GanEpochTrainer):
 
     def train_epoch(self, gan_model: GAN, dataset: torch.utils.data.Dataset,
                     generator_stepper: Stepper, critic_stepper: Stepper,
-                    logger: Optional[Logger] = None) -> None:
+                    logger: Optional[GANLogger] = None) -> None:
         sampler = torch.utils.data.sampler.RandomSampler(dataset, replacement=True)
         random_sampler = torch.utils.data.sampler.BatchSampler(sampler, batch_size=self.batch_size,
                                                                drop_last=False)
-        
-        dataloader = torch.utils.data.DataLoader(dataset, batch_sampler=random_sampler,
-                                                 collate_fn=collate_fn)
+
+        dataloader = torch.utils.data.DataLoader(dataset, batch_sampler=random_sampler, collate_fn=collate_fn)
+        dataloader_iter = iter(dataloader)
 
         def get_batches() -> Tuple[torch.Tensor, torch.Tensor, Any, Any]:
             """Look at the return statement"""
-            real_batch = next(iter(dataloader))
-            real_batch = move_batch_to(real_batch, get_local_device())
-            if isinstance(real_batch, tuple):
-                assert len(real_batch) == 2
-                real_batch_x, real_batch_y = real_batch
-            else:
-                real_batch_x, real_batch_y = real_batch, None
+            real_batch_x, real_batch_y = move_batch_to(next(dataloader_iter), get_local_device())
             gen_batch_y = real_batch_y
             noise_batch_z = gan_model.gen_noise(self.batch_size).to(get_local_device())
             gen_batch_x = gan_model.generator(noise_batch_z, gen_batch_y).to(get_local_device())
@@ -98,9 +95,8 @@ class WganEpochTrainer(GanEpochTrainer):
             loss = - (gan_model.discriminator(real_batch_x, real_batch_y) -
                       gan_model.discriminator(gen_batch_x, gen_batch_y)).mean()
             if logger is not None:
-                logger.log(level='batch', module='train/discriminator',
-                           msg={'batch_num': t + 1, 'wasserstein dist estimation': -loss.item()})
-                logger.flush(level='batch')
+                logger.log_metrics(data={'train/discriminator/loss': -loss.item()},
+                                   period='batch', period_index=t+1, commit=True)
             loss.backward()
             critic_stepper.step()
             critic_stepper.optimizer.zero_grad()
@@ -119,8 +115,8 @@ class WganEpochTrainer(GanEpochTrainer):
         gan_model.discriminator.requires_grad_(True)
 
         if logger is not None:
-            logger.log(level='epoch', module='train/generator',
-                       msg={'wasserstein dist': was_loss_approx.item()})
+            logger.log_metrics(data={'train/generator/loss': was_loss_approx.item()},
+                               period='epoch', commit=False)  # period_index was specified by the caller
 
 
 # знает, что нужно для обучения GAN
@@ -135,8 +131,13 @@ class GanTrainer:
               generator_stepper: Stepper, critic_stepper: Stepper,
               epoch_trainer: GanEpochTrainer,
               n_epochs: int = 100,
-              logger_cm_fn: Optional[Callable[[], ContextManager[Logger]]] = None) -> Generator[Tuple[int, GAN], None, GAN]:
-
+              metric: Optional[Metric] = None,
+              logger_cm_fn: Optional[Callable[[], ContextManager[GANLogger]]] = None) -> Generator[Tuple[int, GAN], None, GAN]:
+        """
+        :param dataset: is expected to return tuples (x, y)
+        :param metric: metric that will be calculated and logged (only if logger is given) after each epoch
+        :return:
+        """
         gan_model.to(get_local_device())
 
         epoch = 1
@@ -154,13 +155,17 @@ class GanTrainer:
         with logger_cm as logger:
             while epoch <= n_epochs:
                 if logger is not None:
-                    logger.log(level='epoch', module='train/generator', msg={'epoch_num': epoch})
+                    logger.log_metrics(data={}, period='epoch', period_index=epoch, commit=False)
 
                 epoch_trainer.train_epoch(gan_model=gan_model, dataset=dataset,
                                           generator_stepper=generator_stepper, critic_stepper=critic_stepper,
                                           logger=logger)
 
-                logger.flush(level='epoch')
+                if logger is not None:
+                    logger.commit(period='epoch')
+                    if metric is not None:
+                        metrics_results = metric(gan_model=gan_model, dataset=dataset)
+                        log_metric(metric, results=metrics_results, logger=logger, period='epoch', period_index=epoch)
                 epoch += 1
 
                 if self.save_checkpoint_once_in_epoch != 0 and epoch % self.save_checkpoint_once_in_epoch == 0:

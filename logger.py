@@ -70,8 +70,11 @@ class GANLogger:
         pass
 
     # Optional for implementation
-    def log_critic_values_distribution(self, critic_values_gen: Iterable[float],
-                                       critic_values_true: Iterable[float]) -> None:
+    # it may plot the histogram, density approximation, etc.
+    # or print some statistics of the distribution (mean, variance, etc.)
+    def log_critic_values_distribution(self, critic_values_true: Iterable[float],
+                                       critic_values_gen: Iterable[float],
+                                       period: str, period_index: int) -> None:
         """
         Log the distributions of critic values
 
