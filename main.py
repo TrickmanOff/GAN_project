@@ -6,10 +6,11 @@ from typing import Tuple, Generator, Optional
 import torch
 
 import data
+import logger
 from discriminators import SimpleImageDiscriminator, MNISTDiscriminator, SimplePhysicsDiscriminator
 from gan import GAN
 from generators import SimpleImageGenerator, MNISTGenerator, SimplePhysicsGenerator
-from logger import Logger, StreamHandler, WandbHandlerCM
+from wandb_logger import WandbCM
 from normalization import apply_normalization, ClippingNormalizer, SpectralNormalizer
 from storage import ExperimentsStorage
 from train import Stepper, WganEpochTrainer, GanTrainer
@@ -45,20 +46,12 @@ def get_wandb_token() -> str:
 
 
 def init_logger(model_name: str = ''):
+    config = logger.get_default_config()
     @contextlib.contextmanager
     def logger_cm():
         try:
-            with WandbHandlerCM(project_name='GANs', experiment_id=model_name, token=get_wandb_token()) as wandb_handler:
-                handlers = {
-                    'config': StreamHandler(),
-                    'epoch': wandb_handler,
-                    # 'epoch': StreamHandler(),
-                    # 'batch': StreamHandler(),
-                }
-                logger = Logger()
-                for level, handler in handlers.items():
-                    logger.add_handler(level, handler)
-                yield logger
+            with WandbCM(project_name='GANs', experiment_id=model_name, token=get_wandb_token(), config=config) as wandb_logger:
+                yield wandb_logger
         finally:
             pass
     return logger_cm

@@ -1,98 +1,82 @@
-import wandb
-
-import io
-import sys
 from abc import abstractmethod
-from collections import defaultdict
-from typing import DefaultDict
+from copy import copy
+from dataclasses import dataclass
+from typing import Dict, Any, Iterable, Set, Optional, Tuple
+
+"""
+Currently there's no convenient support for several loggers at one time.
+It is expected to be provided if the existing logging interface shows its convenience.
+"""
 
 
-class Handler:
+@dataclass
+class LoggerConfig:
+    ignored_periods: Optional[Set[str]] = None
+    ignored_metrics: Optional[Set[str]] = None
+
+
+def get_default_config() -> LoggerConfig:
+    return LoggerConfig(
+        ignored_periods={'batch'}
+    )
+
+
+class GANLogger:
+    """An abstract class for GAN loggers"""
+    def __init__(self, config: Optional[LoggerConfig] = None) -> None:
+        self.config = get_default_config() if config is None else config
+        self.accumulated_data: Dict[str, Tuple[int, Dict[str, Any]]] = {}   # (period: data with {period: period_index})
+
+    def log_metrics(self, data: Dict[str, Any], period: str, period_index: Optional[int] = None, commit: bool = True) -> None:
+        """
+        Log values of metrics after some period
+
+        :param data: a dict of metrics values {metric_name: value}
+        :param period: the name of a period (e.g., "batch", "epoch")
+        :param period_index: the index of a period, if the call is not the first for this period, it may be omitted
+        :param commit: if False, data will be accumulated but not logged
+        use commit=True only for the last call for the pair (period, period_index)
+        """
+        if self.config.ignored_periods and period in self.config.ignored_periods:
+            return
+
+        if self.config.ignored_metrics is not None:
+            data = copy(data)
+            for metric in copy(data):
+                if metric in self.config.ignored_metrics:
+                    data.pop(metric)
+
+        data = copy(data)
+        if period in self.accumulated_data:
+            prev_period_index, prev_data = self.accumulated_data[period]
+            if period_index is not None and prev_period_index != period_index:
+                raise RuntimeError(f'Trying to log data for the {period} #{period_index} while the data for the {period} #{prev_period_index} was not logged')
+            period_index = prev_period_index
+            data.update(prev_data)
+
+        assert period_index is not None, 'Period index is not specified'
+        self.accumulated_data[period] = (period_index, data)
+
+        if commit:
+            self._log_metrics(data, period, period_index)
+            self.accumulated_data.pop(period)
+
+    def commit(self, period: str):
+        if period in self.accumulated_data:
+            self.log_metrics(data={}, period=period, commit=True)
+
     @abstractmethod
-    def flush(self, module: str, msg: dict) -> None:
+    def _log_metrics(self, data: Dict[str, Any], period: str, period_index: int) -> None:
         pass
 
+    # Optional for implementation
+    def log_critic_values_distribution(self, critic_values_gen: Iterable[float],
+                                       critic_values_true: Iterable[float]) -> None:
+        """
+        Log the distributions of critic values
 
-class StreamHandler(Handler):
-    def __init__(self, stream: io.StringIO = sys.stdout) -> None:
-        super().__init__()
-        self._stream = stream
-
-    def flush(self, module: str, msg: dict) -> None:
-        print(module, file=self._stream)
-        margin = 2
-        for name, val in msg.items():
-            if isinstance(val, float):
-                val = round(val, 5)
-            print(' '*margin + name + ':', val, file=self._stream)
-
-
-class _WandbHandler(Handler):
-    """
-    Should be used through WandbHandlerCM
-    """
-    def __init__(self) -> None:
-        super().__init__()
-        wandb.define_metric('epoch_num')
-
-    def flush(self, module: str, msg: dict) -> None:
-        for key in msg:
-            wandb.define_metric(module + '/' + key, step_metric='epoch_num')
-        logged_dict = {module + '/' + key: value for key, value in msg.items() if key != 'epoch_num'}
-        if 'epoch_num' in msg:
-            logged_dict['epoch_num'] = msg['epoch_num']
-        wandb.log(logged_dict)
-
-
-class WandbHandlerCM:
-    def __init__(self, project_name: str, experiment_id: str, token: str) -> None:
-        self.project_name = project_name
-        self.experiment_id = experiment_id
-        self.token = token
-
-    def __enter__(self) -> Handler:
-        wandb.login(key=self.token)
-        wandb.init(
-            project=self.project_name,
-            name=self.experiment_id
-        )
-        return _WandbHandler()
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        wandb.finish()
-
-
-class Logger:
-    """
-    level - уровень логгера. Различные уровни независимы между собой.
-    Пример уровней: "service" - лог, содержащий какую-то служебную информацию,
-                    "user"    - лог, содержащий сообщения для пользователя
-                    "config" (зарезервированное имя) - лог для конфигурации
-
-    module - логирующая единица. Это может быть какой-то объект, пользователь и т.д. Разделение на
-    модули своё для каждого уровня логгера.
-    """
-    def __init__(self) -> None:
-        self._levels_msgs = defaultdict(lambda: defaultdict(dict))
-        self._handlers: DefaultDict[str, list[Handler]] = defaultdict(list)
-        # level:
-        #   module1: {msg}
-        #   module2: {msg}
-
-    def log(self, level: str, module: str, msg: dict, accum: bool = True) -> None:
-        level_dict = self._levels_msgs[level]
-        level_dict[module].update(msg)
-
-        if not accum:
-            self.flush(level)
-
-    def flush(self, level: str) -> None:
-        for handler in self._handlers[level]:
-            for module, msg in self._levels_msgs[level].items():
-                handler.flush(module, msg)
-
-    def add_handler(self, level: str, handler: Handler) -> None:
-        self._handlers[level].append(handler)
-
-    def config(self, config: dict) -> None:
-        self.log(level='config', module='config', msg=config, accum=False)
+        :param critic_values_gen: critic values for the generated data
+        :param critic_values_true: critic values for the true data, must be the same length as
+        `critic_values_gen`
+        """
+        pass
