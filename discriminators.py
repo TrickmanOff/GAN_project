@@ -198,9 +198,10 @@ class SimplePhysicsDiscriminator(Discriminator):
 
 
 class CaloganPhysicsDiscriminator(Discriminator):
-    def __init__(self, act_func=F.leaky_relu):
+    def __init__(self, act_func=F.leaky_relu, add_points_norms_and_angles: bool = True):
         super().__init__()
         self.activation = act_func
+        self.add_points_norms_and_angles = add_points_norms_and_angles
 
         # 30x30x1 -> 32x32x1 (padding)
         # 32x32x1
@@ -215,12 +216,15 @@ class CaloganPhysicsDiscriminator(Discriminator):
         self.conv5 = nn.Conv2d(256, 256, 3, stride=2, padding=0)
         # 1x1x256
 
-        self.fc1 = nn.Linear(256 + 5, 64)
+        condition_dim = 7 if add_points_norms_and_angles else 5
+        self.fc1 = nn.Linear(256 + condition_dim, 64)
         self.fc2 = nn.Linear(64, 32)
         self.fc3 = nn.Linear(32, 1)
 
     def forward(self, EnergyDeposit, y):
         point, momentum = y
+        if self.add_points_norms_and_angles:
+            point = aux.add_angle_and_norm(point)
 
         # print(EnergyDeposit.shape)
         X = self.activation(self.conv1(EnergyDeposit))

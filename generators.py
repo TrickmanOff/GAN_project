@@ -189,13 +189,16 @@ class SimplePhysicsGenerator(Generator):
 
 
 class CaloganPhysicsGenerator(Generator):
-    def __init__(self, noise_dim, act_func=F.relu):
+    def __init__(self, noise_dim: int, act_func=F.relu, add_points_norms_and_angles: bool = True):
         super().__init__()
         self.noise_dim = noise_dim
         self.activation = act_func
 
+        self.add_points_norms_and_angles = add_points_norms_and_angles
+
         # 128 + 5 -> (+reshape) 128 x 2 x 2
-        self.fc1 = nn.Linear(self.noise_dim + 5, self.noise_dim * 2 * 2)
+        condition_dim = 7 if add_points_norms_and_angles else 5
+        self.fc1 = nn.Linear(self.noise_dim + condition_dim, self.noise_dim * 2 * 2)
 
         # Z x 2 x 2
         self.conv1 = nn.ConvTranspose2d(self.noise_dim, 128, 3, stride=2, padding=1, output_padding=1)
@@ -215,6 +218,8 @@ class CaloganPhysicsGenerator(Generator):
 
     def forward(self, z: torch.Tensor, y) -> torch.Tensor:
         point, momentum = y
+        if self.add_points_norms_and_angles:
+            point = aux.add_angle_and_norm(point)
 
         x = torch.cat([z, momentum, point], dim=1)
         # print(x.shape)

@@ -124,7 +124,7 @@ class PhysicsDataset(torch.utils.data.Dataset):
         self.momentum = momentum
 
     def __getitem__(self, idx: int) -> tuple:
-        return (self.energy[idx], (self.point[idx], self.momentum[idx]))
+        return self.energy[idx], (self.point[idx], self.momentum[idx])
 
     def __len__(self) -> int:
         return self.energy.shape[0]
