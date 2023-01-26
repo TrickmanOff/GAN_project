@@ -7,7 +7,7 @@ import torch.utils.data
 from torch import nn
 from torch import optim
 
-from data import collate_fn, move_batch_to
+from data import collate_fn, move_batch_to, get_random_infinite_dataloader
 from device import get_local_device
 from gan import GAN
 from logger import GANLogger
@@ -58,7 +58,8 @@ class Stepper:
 # знает, как обучать GAN
 class GanEpochTrainer(ABC):
     @abstractmethod
-    def train_epoch(self, gan_model: GAN, dataset: torch.utils.data.Dataset,
+    def train_epoch(self, gan_model: GAN,
+                    train_dataset: torch.utils.data.Dataset, val_dataset: torch.utils.data.Dataset,
                     generator_stepper: Stepper, critic_stepper: Stepper,
                     logger: Optional[GANLogger] = None) -> None:
         pass
@@ -69,54 +70,63 @@ class WganEpochTrainer(GanEpochTrainer):
         self.n_critic = n_critic
         self.batch_size = batch_size
 
-    def train_epoch(self, gan_model: GAN, dataset: torch.utils.data.Dataset,
+    def train_epoch(self, gan_model: GAN,
+                    train_dataset: torch.utils.data.Dataset, val_dataset: torch.utils.data.Dataset,
                     generator_stepper: Stepper, critic_stepper: Stepper,
                     logger: Optional[GANLogger] = None) -> None:
-        sampler = torch.utils.data.sampler.RandomSampler(dataset, replacement=True)
-        random_sampler = torch.utils.data.sampler.BatchSampler(sampler, batch_size=self.batch_size,
-                                                               drop_last=False)
+        dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=self.batch_size, collate_fn=collate_fn, shuffle=True)
+        random_dataloader = get_random_infinite_dataloader(train_dataset, batch_size=self.batch_size, collate_fn=collate_fn)
+        random_dataloader_iter = iter(random_dataloader)
 
-        dataloader = torch.utils.data.DataLoader(dataset, batch_sampler=random_sampler, collate_fn=collate_fn)
-        dataloader_iter = iter(dataloader)
-
-        def get_batches() -> Tuple[torch.Tensor, torch.Tensor, Any, Any]:
+        def get_batches(real_batch) -> Tuple[torch.Tensor, torch.Tensor, Any, Any]:
             """Look at the return statement"""
-            real_batch_x, real_batch_y = move_batch_to(next(dataloader_iter), get_local_device())
+            real_batch_x, real_batch_y = move_batch_to(real_batch, get_local_device())
             gen_batch_y = real_batch_y
             noise_batch_z = gan_model.gen_noise(self.batch_size).to(get_local_device())
             gen_batch_x = gan_model.generator(noise_batch_z, gen_batch_y).to(get_local_device())
 
             return gen_batch_x, real_batch_x, gen_batch_y, real_batch_y
 
-        # critic training
-        gan_model.generator.requires_grad_(False)
-        for t in range(self.n_critic):
-            gen_batch_x, real_batch_x, gen_batch_y, real_batch_y = get_batches()
-            loss = - (gan_model.discriminator(real_batch_x, real_batch_y) -
-                      gan_model.discriminator(gen_batch_x, gen_batch_y)).mean()
+        was_loss_approx_total = 0.
+
+        for batch_index, generator_batch in enumerate(dataloader):
+            # critic training
+            gan_model.generator.requires_grad_(False)
+            for t in range(self.n_critic):
+                real_batch = next(random_dataloader_iter)
+                gen_batch_x, real_batch_x, gen_batch_y, real_batch_y = get_batches(real_batch)
+                loss = - (gan_model.discriminator(real_batch_x, real_batch_y) -
+                          gan_model.discriminator(gen_batch_x, gen_batch_y)).mean()
+                if logger is not None:
+                    logger.log_metrics(data={'train/discriminator/loss': -loss.item()},
+                                       period='batch', period_index=t+1, commit=True)
+                loss.backward()
+                critic_stepper.step()
+                critic_stepper.optimizer.zero_grad()
+                update_normalizers_stats(gan_model.discriminator)
+            gan_model.generator.requires_grad_(True)
+
+            # generator training
+            gan_model.discriminator.requires_grad_(False)
+            gen_batch_x, real_batch_x, gen_batch_y, real_batch_y = get_batches(generator_batch)
+
+            observations = (gan_model.discriminator(real_batch_x, real_batch_y) -
+                            gan_model.discriminator(gen_batch_x, gen_batch_y))
+            was_loss_approx = observations.mean()
+            was_loss_approx_total += observations.sum().item()
+            was_loss_approx.backward()
+            generator_stepper.step()
+            generator_stepper.optimizer.zero_grad()
+            gan_model.discriminator.requires_grad_(True)
+
             if logger is not None:
-                logger.log_metrics(data={'train/discriminator/loss': -loss.item()},
-                                   period='batch', period_index=t+1, commit=True)
-            loss.backward()
-            critic_stepper.step()
-            critic_stepper.optimizer.zero_grad()
-            update_normalizers_stats(gan_model.discriminator)
-        gan_model.generator.requires_grad_(True)
-
-        # generator training
-        gan_model.discriminator.requires_grad_(False)
-        gen_batch_x, real_batch_x, gen_batch_y, real_batch_y = get_batches()
-
-        was_loss_approx = (gan_model.discriminator(real_batch_x, real_batch_y) -
-                           gan_model.discriminator(gen_batch_x, gen_batch_y)).mean()
-        was_loss_approx.backward()
-        generator_stepper.step()
-        generator_stepper.optimizer.zero_grad()
-        gan_model.discriminator.requires_grad_(True)
+                logger.log_metrics(data={'train/generator/loss': was_loss_approx.item()},
+                                   period='batch', period_index=batch_index+1, commit=False)
 
         if logger is not None:
-            logger.log_metrics(data={'train/generator/loss': was_loss_approx.item()},
-                               period='epoch', commit=False)  # period_index was specified by the caller
+            logger.log_metrics(data={'train/generator/loss': was_loss_approx_total / len(train_dataset)},
+                               period='epoch',
+                               commit=False)  # period_index was specified by the caller
 
 
 # знает, что нужно для обучения GAN
@@ -127,14 +137,16 @@ class GanTrainer:
         self.save_checkpoint_once_in_epoch = save_checkpoint_once_in_epoch
         self.use_saved_checkpoint = use_saved_checkpoint
 
-    def train(self, dataset: torch.utils.data.Dataset, gan_model: GAN,
+    def train(self, gan_model: GAN,
+              train_dataset: torch.utils.data.Dataset, val_dataset: torch.utils.data.Dataset,
               generator_stepper: Stepper, critic_stepper: Stepper,
               epoch_trainer: GanEpochTrainer,
               n_epochs: int = 100,
               metric: Optional[Metric] = None,
               logger_cm_fn: Optional[Callable[[], ContextManager[GANLogger]]] = None) -> Generator[Tuple[int, GAN], None, GAN]:
         """
-        :param dataset: is expected to return tuples (x, y)
+        :param train_dataset: is expected to return tuples (x, y)
+        :param val_dataset: is expected to return tuples (x, y)
         :param metric: metric that will be calculated and logged (only if logger is given) after each epoch
         :return:
         """
@@ -157,14 +169,14 @@ class GanTrainer:
                 if logger is not None:
                     logger.log_metrics(data={}, period='epoch', period_index=epoch, commit=False)
 
-                epoch_trainer.train_epoch(gan_model=gan_model, dataset=dataset,
+                epoch_trainer.train_epoch(gan_model=gan_model, train_dataset=train_dataset, val_dataset=val_dataset,
                                           generator_stepper=generator_stepper, critic_stepper=critic_stepper,
                                           logger=logger)
 
                 if logger is not None:
                     logger.commit(period='epoch')
                     if metric is not None:
-                        metrics_results = metric(gan_model=gan_model, dataset=dataset)
+                        metrics_results = metric(gan_model=gan_model, train_dataset=train_dataset, val_dataset=val_dataset)
                         log_metric(metric, results=metrics_results, logger=logger, period='epoch', period_index=epoch)
                 epoch += 1
 

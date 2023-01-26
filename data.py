@@ -1,3 +1,4 @@
+from itertools import cycle
 from typing import Tuple, List, Optional, Union, Any
 
 import numpy as np
@@ -17,6 +18,19 @@ y - либо число, либо тензор, либо tuple с числами
 Обёртка в виде UnifiedDatasetWrapper приводит оба типа датасетов ко 2-му (для датасета 1-го типа y = None).
 Обёртку следует использовать пользователю.
 """
+
+
+class RandomDataloader(torch.utils.data.DataLoader):
+    def __init__(self, dataset: torch.utils.data.Dataset, batch_size: int, *args, **kwargs):
+        sampler = torch.utils.data.sampler.RandomSampler(dataset, replacement=True)
+        random_sampler = torch.utils.data.sampler.BatchSampler(sampler, batch_size=batch_size,
+                                                               drop_last=False)
+
+        super().__init__(dataset, batch_sampler=random_sampler, *args, **kwargs)
+
+
+def get_random_infinite_dataloader(dataset: torch.utils.data.Dataset, batch_size: int, *args, **kwargs):
+    return cycle(RandomDataloader(dataset, batch_size=batch_size, *args, **kwargs))
 
 
 def collate_fn(els_list: List[Union[Tuple, int, torch.Tensor]]):
@@ -110,11 +124,11 @@ def get_default_image_transform(dim: int) -> transforms.Compose:
 default_image_transform = get_default_image_transform(3)
 
 
-def get_cifar_10_dataset(root='./cifar10', keep_labels: bool = True, kept_labels: Optional[List[int]] = None):
+def get_cifar_10_dataset(root='./cifar10', train: bool = True, keep_labels: bool = True, kept_labels: Optional[List[int]] = None):
     """
     :param kept_labels: images with which labels should be used
     """
-    cifar_dataset = torchvision.datasets.CIFAR10(root=root, train=True, download=True,
+    cifar_dataset = torchvision.datasets.CIFAR10(root=root, train=train, download=True,
                                                  transform=default_image_transform, )
 
     if kept_labels is not None:
@@ -130,8 +144,8 @@ def get_cifar_10_dataset(root='./cifar10', keep_labels: bool = True, kept_labels
     return cifar_dataset
 
 
-def get_mnist_dataset(root='./mnist', keep_labels: bool = True):
-    mnist_dataset = torchvision.datasets.MNIST(root=root, train=True, download=True,
+def get_mnist_dataset(root='./mnist', train: bool = True, keep_labels: bool = True):
+    mnist_dataset = torchvision.datasets.MNIST(root=root, train=train, download=True,
                                                transform=get_default_image_transform(1))
 
     if not keep_labels:
@@ -155,17 +169,26 @@ class PhysicsDataset(torch.utils.data.Dataset):
         return self.energy.shape[0]
 
 
-def get_physics_dataset(path: str) -> torch.utils.data.Dataset:
+def get_physics_dataset(path: str, train: bool = True, val_ratio: float = 0.5) -> torch.utils.data.Dataset:
+    TRAIN_VAL_SPLIT_SEED = 0x3df3fa
+
     data_train = np.load(path)
 
-    np.random.seed(42)
-    ind_arr = np.random.choice(np.arange(len(data_train['EnergyDeposit'])),
-                               size=len(data_train['EnergyDeposit']) // 2)
-    #     energy   = torch.tensor(data_train['EnergyDeposit'][ind_arr].reshape(-1, 900)).float()
-    energy = torch.tensor(data_train['EnergyDeposit'][ind_arr]).float()
+    np.random.seed(TRAIN_VAL_SPLIT_SEED)
+    dataset_size = len(data_train['EnergyDeposit'])
+    val_size = int(dataset_size * val_ratio)
+
+    all_indices = np.arange(dataset_size)
+    val_indices = np.random.choice(all_indices, size=val_size, replace=False)
+    val_mask = np.zeros(dataset_size, dtype=bool)
+    val_mask[val_indices] = True
+    train_indices = all_indices[~val_mask]
+    indices = train_indices if train else val_indices
+
+    energy = torch.tensor(data_train['EnergyDeposit'][indices]).float()
     energy = torch.log1p(energy)  # !
     energy = torch.permute(energy, dims=(0, 3, 1, 2))
-    point = torch.tensor(data_train['ParticlePoint'][:, :2][ind_arr]).float()
-    momentum = torch.tensor(data_train['ParticleMomentum'][ind_arr]).float()
+    point = torch.tensor(data_train['ParticlePoint'][:, :2][indices]).float()
+    momentum = torch.tensor(data_train['ParticleMomentum'][indices]).float()
 
     return PhysicsDataset(energy, point, momentum)

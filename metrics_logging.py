@@ -21,4 +21,4 @@ def log_metric(metric: Metric, results: Any, logger: GANLogger, period: str, per
         critic_vals_true, critic_vals_gen = results
         logger.log_critic_values_distribution(critic_vals_true, critic_vals_gen, period=period, period_index=period_index)
     else:
-        raise NotImplementedError('This metric is not supported for logging')
+        raise NotImplementedError(f'Metric "{type(metric)}" is not supported for logging')

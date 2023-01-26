@@ -7,11 +7,11 @@ import torch
 
 import data
 import logger
-from discriminators import SimpleImageDiscriminator, MNISTDiscriminator, SimplePhysicsDiscriminator
+from discriminators import SimplePhysicsDiscriminator, CaloganPhysicsDiscriminator
 from gan import GAN
-from generators import SimpleImageGenerator, MNISTGenerator, SimplePhysicsGenerator
+from generators import SimplePhysicsGenerator, CaloganPhysicsGenerator
 from metrics import CriticValuesDistributionMetric, Metric
-from normalization import apply_normalization, ClippingNormalizer, SpectralNormalizer
+from normalization import apply_normalization, SpectralNormalizer
 from storage import ExperimentsStorage
 from train import Stepper, WganEpochTrainer, GanTrainer
 from wandb_logger import WandbCM
@@ -68,17 +68,18 @@ def form_gan_trainer(model_name: str, gan_model: Optional[GAN] = None, n_epochs:
     """
     logger_cm_fn = init_logger(model_name)
     metric = form_metric()
-    # classes_cnt = 10
-    # dataset = data.get_physics_dataset('/kaggle/input/physics-gan/caloGAN_case11_5D_120K.npz')
-    dataset = data.get_physics_dataset('../caloGAN_case11_5D_120K.npz')
+
+    data_filepath = '../caloGAN_case11_5D_120K.npz'
+    train_dataset = data.get_physics_dataset(data_filepath, train=True)
+    val_dataset = data.get_physics_dataset(data_filepath, train=False)
 
     noise_dimension = 50
 
     def uniform_noise_generator(n: int) -> torch.Tensor:
         return 2*torch.rand(size=(n, noise_dimension)) - 1  # [-1, 1]
 
-    generator = SimplePhysicsGenerator(noise_dim=noise_dimension)
-    discriminator = SimplePhysicsDiscriminator()
+    generator = CaloganPhysicsGenerator(noise_dim=noise_dimension)
+    discriminator = CaloganPhysicsDiscriminator()
     discriminator = apply_normalization(discriminator, SpectralNormalizer)
 
     if gan_model is None:
@@ -92,11 +93,12 @@ def form_gan_trainer(model_name: str, gan_model: Optional[GAN] = None, n_epochs:
         optimizer=torch.optim.RMSprop(discriminator.parameters(), lr=1e-5)
     )
 
-    epoch_trainer = WganEpochTrainer(n_critic=20, batch_size=64)
+    epoch_trainer = WganEpochTrainer(n_critic=5, batch_size=100)
 
     model_dir = experiments_storage.get_model_dir(model_name)
     trainer = GanTrainer(model_dir=model_dir, use_saved_checkpoint=True, save_checkpoint_once_in_epoch=500)
-    train_gan_generator = trainer.train(dataset=dataset, gan_model=gan_model,
+    train_gan_generator = trainer.train(gan_model=gan_model,
+                                        train_dataset=train_dataset, val_dataset=val_dataset,
                                         generator_stepper=generator_stepper,
                                         critic_stepper=discriminator_stepper,
                                         epoch_trainer=epoch_trainer,
@@ -116,7 +118,7 @@ def call_generator(generator):
 
 
 def main():
-    model_name = 'mnist_test'
+    model_name = 'physics_test'
     gan_trainer = form_gan_trainer(model_name=model_name, n_epochs=100)
     gan_model = call_generator(gan_trainer)
     # do sth with gan model

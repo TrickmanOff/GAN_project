@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import torch.utils.data
 
-from data import collate_fn
+from data import collate_fn, get_random_infinite_dataloader, move_batch_to
 from device import get_local_device
 from gan import GAN
 
@@ -15,8 +15,10 @@ class Metric:
 
     def __call__(self, gan_model: Optional[GAN] = None,
                  dataloader: Optional[torch.utils.data.DataLoader] = None,
-                 dataset: Optional[torch.utils.data.Dataset] = None):
-        return self.evaluate(gan_model=gan_model, dataloader=dataloader, dataset=dataset)
+                 train_dataset: Optional[torch.utils.data.Dataset] = None,
+                 val_dataset: Optional[torch.utils.data.Dataset] = None):
+        return self.evaluate(gan_model=gan_model, dataloader=dataloader,
+                             train_dataset=train_dataset, val_dataset=val_dataset)
 
 
 class CriticValuesDistributionMetric(Metric):
@@ -26,21 +28,17 @@ class CriticValuesDistributionMetric(Metric):
         """
         self.values_cnt = values_cnt
 
-    def evaluate(self, gan_model: Optional[GAN] = None, dataset: Optional[torch.utils.data.Dataset] = None, **kwargs) -> Tuple[np.ndarray, np.ndarray]:
+    def evaluate(self, gan_model: Optional[GAN] = None, train_dataset: Optional[torch.utils.data.Dataset] = None, **kwargs) -> Tuple[np.ndarray, np.ndarray]:
         """
         :return: critic_vals_true, critic_vals_gen
         """
-        if gan_model is None or dataset is None:
+        if gan_model is None or train_dataset is None:
             raise RuntimeError('Required arguments not given')
 
         batch_size = 64
 
         # random batches
-        sampler = torch.utils.data.sampler.RandomSampler(dataset, replacement=True)
-        random_sampler = torch.utils.data.sampler.BatchSampler(sampler, batch_size=batch_size,
-                                                               drop_last=False)
-
-        dataloader = torch.utils.data.DataLoader(dataset, batch_sampler=random_sampler, collate_fn=collate_fn)
+        dataloader = get_random_infinite_dataloader(train_dataset, batch_size=batch_size, collate_fn=collate_fn)
         dataloader_iter = iter(dataloader)
 
         critic_vals_true = []
@@ -48,7 +46,7 @@ class CriticValuesDistributionMetric(Metric):
 
         batches_cnt = (self.values_cnt + batch_size - 1) // batch_size
         for _ in range(batches_cnt):
-            real_batch_x, real_batch_y = next(dataloader_iter)
+            real_batch_x, real_batch_y = move_batch_to(next(dataloader_iter), get_local_device())
             with torch.no_grad():
                 # (batch_size, )
                 true_vals = gan_model.discriminator(real_batch_x, real_batch_y)
@@ -60,7 +58,7 @@ class CriticValuesDistributionMetric(Metric):
                 gen_vals = gan_model.discriminator(gen_batch_x, gen_batch_y)
                 critic_vals_gen.append(gen_vals)
 
-        return torch.cat(critic_vals_true).flatten().numpy(), torch.cat(critic_vals_gen).flatten().numpy()
+        return torch.cat(critic_vals_true).flatten().cpu().numpy(), torch.cat(critic_vals_gen).flatten().cpu().numpy()
 
 
 class MetricsSequence(Metric):
