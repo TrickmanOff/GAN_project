@@ -1,5 +1,5 @@
 from itertools import cycle
-from typing import Tuple, List, Optional, Union, Any
+from typing import Tuple, List, Optional, Union, Any, Sequence
 
 import numpy as np
 import torch
@@ -33,20 +33,33 @@ def get_random_infinite_dataloader(dataset: torch.utils.data.Dataset, batch_size
     return cycle(RandomDataloader(dataset, batch_size=batch_size, *args, **kwargs))
 
 
-def collate_fn(els_list: List[Union[Tuple, int, torch.Tensor]]):
+def collate_fn(els_list: Sequence[Union[Tuple, int, torch.Tensor]]):
     if isinstance(els_list[0], tuple):
         return tuple(collate_fn(list(a)) for a in zip(*els_list))
     elif isinstance(els_list[0], int):
         return torch.Tensor(els_list)
     elif isinstance(els_list[0], torch.Tensor):
         return torch.stack(els_list)
+    elif els_list[0] is None:
+        return None
     else:
         raise RuntimeError
+
+
+def stack_batches(batches_list):
+    if isinstance(batches_list[0], tuple):
+        return tuple(stack_batches(list(a)) for a in zip(*batches_list))
+    elif isinstance(batches_list[0], torch.Tensor):
+        return torch.concat(batches_list, dim=0)
+    elif batches_list[0] is None:
+        return None
 
 
 def move_batch_to(batch, device):
     if isinstance(batch, tuple):
         return tuple(move_batch_to(subbatch, device) for subbatch in batch)
+    elif batch is None:
+        return None
     else:
         return batch.to(device)
 

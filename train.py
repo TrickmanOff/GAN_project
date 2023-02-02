@@ -4,8 +4,8 @@ from abc import ABC, abstractmethod
 
 import torch
 import torch.utils.data
-from torch import nn
 from torch import optim
+from tqdm import tqdm
 
 from data import collate_fn, move_batch_to, get_random_infinite_dataloader
 from device import get_local_device
@@ -82,14 +82,16 @@ class WganEpochTrainer(GanEpochTrainer):
             """Look at the return statement"""
             real_batch_x, real_batch_y = move_batch_to(real_batch, get_local_device())
             gen_batch_y = real_batch_y
-            noise_batch_z = gan_model.gen_noise(self.batch_size).to(get_local_device())
+            noise_batch_z = gan_model.gen_noise(len(real_batch_x)).to(get_local_device())
             gen_batch_x = gan_model.generator(noise_batch_z, gen_batch_y).to(get_local_device())
 
             return gen_batch_x, real_batch_x, gen_batch_y, real_batch_y
 
         was_loss_approx_total = 0.
 
-        for batch_index, generator_batch in enumerate(dataloader):
+        # generator_batch = next(random_dataloader_iter)  # for local testing
+        # for batch_index in range(1):                    # -----------------
+        for batch_index, generator_batch in enumerate(tqdm(dataloader)):
             # critic training
             gan_model.generator.requires_grad_(False)
             for t in range(self.n_critic):
@@ -154,6 +156,8 @@ class GanTrainer:
 
         epoch = 1
 
+        val_data = collate_fn(val_dataset)
+
         if self.use_saved_checkpoint:
             checkpoint = self.model_dir.get_checkpoint_state()
             if checkpoint is not None:
@@ -176,7 +180,8 @@ class GanTrainer:
                 if logger is not None:
                     logger.commit(period='epoch')
                     if metric is not None:
-                        metrics_results = metric(gan_model=gan_model, train_dataset=train_dataset, val_dataset=val_dataset)
+                        metrics_results = metric(gan_model=gan_model, train_dataset=train_dataset, val_dataset=val_dataset,
+                                                 val_data=val_data)
                         log_metric(metric, results=metrics_results, logger=logger, period='epoch', period_index=epoch)
                 epoch += 1
 

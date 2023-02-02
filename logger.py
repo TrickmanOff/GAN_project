@@ -72,6 +72,11 @@ class GANLogger:
     # Optional for implementation
     # it may plot the histogram, density approximation, etc.
     # or print some statistics of the distribution (mean, variance, etc.)
+    def log_distribution(self, values: Dict[str, Iterable[float]], name: str,
+                         period: str, period_index: int) -> None:
+        pass
+
+    # Optional for implementation
     def log_critic_values_distribution(self, critic_values_true: Iterable[float],
                                        critic_values_gen: Iterable[float],
                                        period: str, period_index: int) -> None:

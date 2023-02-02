@@ -10,7 +10,9 @@ import logger
 from discriminators import SimplePhysicsDiscriminator, CaloganPhysicsDiscriminator
 from gan import GAN
 from generators import SimplePhysicsGenerator, CaloganPhysicsGenerator
-from metrics import CriticValuesDistributionMetric, Metric
+from metrics import CriticValuesDistributionMetric, Metric, MetricsSequence, LongitudualClusterAsymmetryMetric, \
+                    TransverseClusterAsymmetryMetric, ClusterLongitudualWidthMetric, ClusterTransverseWidthMetric, \
+                    DataStatistics
 from normalization import apply_normalization, SpectralNormalizer
 from storage import ExperimentsStorage
 from train import Stepper, WganEpochTrainer, GanTrainer
@@ -59,7 +61,15 @@ def init_logger(model_name: str = ''):
 
 
 def form_metric() -> Metric:
-    return CriticValuesDistributionMetric(values_cnt=1000)
+    return MetricsSequence(
+        CriticValuesDistributionMetric(values_cnt=1000),
+        DataStatistics(
+            LongitudualClusterAsymmetryMetric(),
+            TransverseClusterAsymmetryMetric(),
+            ClusterLongitudualWidthMetric(),
+            ClusterTransverseWidthMetric(),
+        ),
+    )
 
 
 def form_gan_trainer(model_name: str, gan_model: Optional[GAN] = None, n_epochs: int = 100) -> Generator[Tuple[int, GAN], None, GAN]:

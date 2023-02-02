@@ -1,13 +1,48 @@
 """A bridge between metrics and logger"""
-from typing import Any, Union
+from dataclasses import dataclass
+from typing import Any, Union, Tuple, Optional, Dict, Type
 
 import numpy as np
 
 from logger import GANLogger
-from metrics import Metric, MetricsSequence, CriticValuesDistributionMetric
+from metrics import Metric, MetricsSequence, CriticValuesDistributionMetric, \
+                    LongitudualClusterAsymmetryMetric, DataStatistic, DataStatistics, \
+                    TransverseClusterAsymmetryMetric, ClusterLongitudualWidthMetric, \
+                    ClusterTransverseWidthMetric
 
 
-def log_metric(metric: Metric, results: Any, logger: GANLogger, period: str, period_index: int) -> None:
+def _reduce_range(x: np.ndarray, quantile_removed: float, values_range: Optional[Tuple[float, float]] = None):
+    """
+    Removes at least (quantile_removed/2)*100% minimal and maximal values.
+    Then only values from the range `values_range` (exclusively) are left, if this range is not None.
+    """
+    lower_bound = np.quantile(x, quantile_removed / 2)
+    upper_bound = np.quantile(x, 1 - quantile_removed / 2)
+    if values_range is not None:
+        lower_bound = max(lower_bound, values_range[0])
+        upper_bound = min(upper_bound, values_range[1])
+    return x[(x > lower_bound) & (x < upper_bound)]
+
+
+# for metrics that return samples
+@dataclass
+class DistributionLogInfo:
+    name: str
+    values_range: Optional[Tuple[float, float]] = None
+
+
+DISTRIBUTIONS_LOG_INFO: Dict[Type, DistributionLogInfo] = {
+    LongitudualClusterAsymmetryMetric: DistributionLogInfo(name='Longitudual Cluster Asymmetry'),
+    TransverseClusterAsymmetryMetric: DistributionLogInfo(name='Transverse Cluster Asymmetry'),
+    ClusterLongitudualWidthMetric: DistributionLogInfo(name='Cluster Longitudual Width',
+                                                       values_range=(0, 15)),
+    ClusterTransverseWidthMetric: DistributionLogInfo(name='Cluster Transverse Width',
+                                                      values_range=(0, 15)),
+}
+
+
+def log_metric(metric: Metric, results: Any, logger: GANLogger, period: str, period_index: int,
+               quantile_removed: float = 0.01) -> None:
     """
     :param metric:
     :param logger:
@@ -20,5 +55,22 @@ def log_metric(metric: Metric, results: Any, logger: GANLogger, period: str, per
         critic_vals_gen: np.ndarray
         critic_vals_true, critic_vals_gen = results
         logger.log_critic_values_distribution(critic_vals_true, critic_vals_gen, period=period, period_index=period_index)
+    elif isinstance(metric, DataStatistics):
+        for statistic, res in zip(metric.statistics, results):
+            log_metric(statistic, res, logger, period=period, period_index=period_index)
+    elif isinstance(metric, DataStatistic):
+        if type(metric) in DISTRIBUTIONS_LOG_INFO:
+            dist_log_info = DISTRIBUTIONS_LOG_INFO[type(metric)]
+
+            gen_values, true_values = results
+            gen_values = _reduce_range(gen_values, quantile_removed, values_range=dist_log_info.values_range)
+            values = {'gen': gen_values}
+            if true_values is not None:
+                true_values = _reduce_range(true_values, quantile_removed, values_range=dist_log_info.values_range)
+                values['true'] = true_values
+            logger.log_distribution(values=values, name=dist_log_info.name, period=period,
+                                    period_index=period_index)
+        else:
+            raise NotImplementedError  # currently, all DataStatistic-s return samples from a distribution
     else:
         raise NotImplementedError(f'Metric "{type(metric)}" is not supported for logging')
