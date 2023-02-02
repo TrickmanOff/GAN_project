@@ -199,7 +199,7 @@ def get_physics_dataset(path: str, train: bool = True, val_ratio: float = 0.5) -
     indices = train_indices if train else val_indices
 
     energy = torch.tensor(data_train['EnergyDeposit'][indices]).float()
-    energy = torch.log1p(energy)  # !
+    # energy = torch.log1p(energy)  # !
     energy = torch.permute(energy, dims=(0, 3, 1, 2))
     point = torch.tensor(data_train['ParticlePoint'][:, :2][indices]).float()
     momentum = torch.tensor(data_train['ParticleMomentum'][indices]).float()
