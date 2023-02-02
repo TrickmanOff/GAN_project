@@ -178,11 +178,11 @@ class GanTrainer:
                                           logger=logger)
 
                 if logger is not None:
-                    logger.commit(period='epoch')
                     if metric is not None:
                         metrics_results = metric(gan_model=gan_model, train_dataset=train_dataset, val_dataset=val_dataset,
                                                  val_data=val_data)
                         log_metric(metric, results=metrics_results, logger=logger, period='epoch', period_index=epoch)
+                    logger.commit(period='epoch')
                 epoch += 1
 
                 if self.save_checkpoint_once_in_epoch != 0 and epoch % self.save_checkpoint_once_in_epoch == 0:
