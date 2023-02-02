@@ -8,7 +8,17 @@ from logger import GANLogger
 from metrics import Metric, MetricsSequence, CriticValuesDistributionMetric, \
                     LongitudualClusterAsymmetryMetric, DataStatistic, DataStatistics, \
                     TransverseClusterAsymmetryMetric, ClusterLongitudualWidthMetric, \
-                    ClusterTransverseWidthMetric
+                    ClusterTransverseWidthMetric, \
+                    PhysicsPRDMetric
+from physical_metrics.calogan_prd import plot_pr_aucs
+
+"""
+Agreements:
+- All functions that use matplotlib.pyplot to plot a chart should not call `plt.show()`.
+They are expected to create new figure and use it. When logging two options are possible:
+a) plt.show()
+b) plt.savefig() + plt.close()
+"""
 
 
 def _reduce_range(x: np.ndarray, quantile_removed: float, values_range: Optional[Tuple[float, float]] = None):
@@ -59,7 +69,12 @@ def log_metric(metric: Metric, results: Any, logger: GANLogger, period: str, per
         for statistic, res in zip(metric.statistics, results):
             log_metric(statistic, res, logger, period=period, period_index=period_index)
     elif isinstance(metric, DataStatistic):
-        if type(metric) in DISTRIBUTIONS_LOG_INFO:
+        if type(metric) == PhysicsPRDMetric:
+            precisions, recalls = results
+            pr_aucs = plot_pr_aucs(precisions=precisions, recalls=recalls)
+            logger.log_pyplot('PRD', period=period, period_index=period_index)
+            logger.log_metrics(data={'PRD PR-AUC': np.mean(pr_aucs)}, period=period, period_index=period_index, commit=False)
+        elif type(metric) in DISTRIBUTIONS_LOG_INFO:
             dist_log_info = DISTRIBUTIONS_LOG_INFO[type(metric)]
 
             gen_values, true_values = results

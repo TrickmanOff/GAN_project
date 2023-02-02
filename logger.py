@@ -88,3 +88,11 @@ class GANLogger:
         `critic_values_gen`
         """
         pass
+
+    # Optional for implementation
+    def log_pyplot(self, name: str, period: str, period_index: int) -> None:
+        """
+        Log the current opened figure.
+        A matplotlib.pyplot figure is expected to be created before a call.
+        """
+        pass

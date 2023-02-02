@@ -8,7 +8,7 @@ import torch.utils.data
 from data import collate_fn, get_random_infinite_dataloader, move_batch_to, stack_batches
 from device import get_local_device
 from gan import GAN
-from physical_metrics import calogan_metrics
+from physical_metrics import calogan_metrics, calogan_prd
 
 
 class Metric:
@@ -151,6 +151,14 @@ class ClusterTransverseWidthMetric(DataStatistic):
     def evaluate_statistic(self, data):
         EnergyDeposit, ParticlePoint, ParticleMomentum = split_prep_physics_data(data)
         return calogan_metrics.get_shower_width(EnergyDeposit, ParticleMomentum, ParticlePoint, orthog=True)
+
+
+class PhysicsPRDMetric(DataStatistic):
+    def evaluate(self, gen_data: Any,
+                 val_data: Optional[Any] = None,
+                 **kwargs) -> Tuple[Any, Any]:
+        precisions, recalls = calogan_prd.calc_pr_rec(data_real=val_data[0], data_fake=gen_data[0])
+        return precisions, recalls
 
 
 class MetricsSequence(Metric):

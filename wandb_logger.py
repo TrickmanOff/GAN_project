@@ -1,8 +1,10 @@
+import tempfile
 from copy import copy
 from typing import Dict, Any, Set, Optional, Iterable
 
 import numpy as np
 import wandb
+from matplotlib import pyplot as plt
 from scipy.stats import gaussian_kde
 
 from logger import GANLogger, LoggerConfig
@@ -12,6 +14,8 @@ class _WandbLogger(GANLogger):
     """
     Should be used only from WandbCM
     """
+    PYPLOT_FORMAT = 'png'
+
     def __init__(self, config: Optional[LoggerConfig] = None):
         super().__init__(config=config)
 
@@ -57,6 +61,15 @@ class _WandbLogger(GANLogger):
                 },
             name='Critic values',
             period=period, period_index=period_index)
+
+    def log_pyplot(self, name: str, period: str, period_index: int) -> None:
+        file = tempfile.NamedTemporaryFile()
+        plt.savefig(file, format=self.PYPLOT_FORMAT)
+        plt.close()
+
+        wandb.log({name: wandb.Image(file.name)})
+
+        file.close()
 
 
 class WandbCM:

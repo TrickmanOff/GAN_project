@@ -12,7 +12,7 @@ from gan import GAN
 from generators import SimplePhysicsGenerator, CaloganPhysicsGenerator
 from metrics import CriticValuesDistributionMetric, Metric, MetricsSequence, LongitudualClusterAsymmetryMetric, \
                     TransverseClusterAsymmetryMetric, ClusterLongitudualWidthMetric, ClusterTransverseWidthMetric, \
-                    DataStatistics
+                    DataStatistics, PhysicsPRDMetric
 from normalization import apply_normalization, SpectralNormalizer
 from storage import ExperimentsStorage
 from train import Stepper, WganEpochTrainer, GanTrainer
@@ -68,6 +68,7 @@ def form_metric() -> Metric:
             TransverseClusterAsymmetryMetric(),
             ClusterLongitudualWidthMetric(),
             ClusterTransverseWidthMetric(),
+            PhysicsPRDMetric(),
         ),
     )
 
@@ -82,7 +83,10 @@ def form_gan_trainer(model_name: str, gan_model: Optional[GAN] = None, n_epochs:
     data_filepath = '../caloGAN_case11_5D_120K.npz'
     train_dataset = data.get_physics_dataset(data_filepath, train=True)
     val_dataset = data.get_physics_dataset(data_filepath, train=False)
-
+    # for local testing
+    # val_size = int(0.3 * len(val_dataset))
+    # val_dataset = torch.utils.data.Subset(val_dataset, np.arange(val_size))
+    # -------
     noise_dimension = 50
 
     def uniform_noise_generator(n: int) -> torch.Tensor:
