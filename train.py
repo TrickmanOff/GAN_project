@@ -1,5 +1,5 @@
 import contextlib
-from typing import Tuple, Generator, Dict, Any, Optional, ContextManager, Callable
+from typing import Tuple, Generator, Dict, Any, Optional, ContextManager, Callable, List
 from abc import ABC, abstractmethod
 
 import torch
@@ -11,9 +11,10 @@ from data import collate_fn, move_batch_to, get_random_infinite_dataloader
 from device import get_local_device
 from gan import GAN
 from logger import GANLogger
-from metrics import Metric
+from metrics import Metric, MetricsSequence
 from metrics_logging import log_metric
 from normalization import update_normalizers_stats
+from results_storage import ExperimentInfo, Result
 from storage import ModelDir
 
 
@@ -131,6 +132,14 @@ class WganEpochTrainer(GanEpochTrainer):
                                commit=False)  # period_index was specified by the caller
 
 
+def fill_result(result: Result, metric_names: List, metric_values: List):
+    for metric_name, metric_value in zip(metric_names, metric_values):
+        if isinstance(metric_name, List):
+            fill_result(result, metric_name, metric_value)
+        else:
+            result.add_metric(metric_name, value=metric_value)
+
+
 # знает, что нужно для обучения GAN
 class GanTrainer:
     def __init__(self, model_dir: ModelDir, save_checkpoint_once_in_epoch: int = 1,
@@ -145,7 +154,9 @@ class GanTrainer:
               epoch_trainer: GanEpochTrainer,
               n_epochs: int = 100,
               metric: Optional[Metric] = None,
-              logger_cm_fn: Optional[Callable[[], ContextManager[GANLogger]]] = None) -> Generator[Tuple[int, GAN], None, GAN]:
+              logger_cm_fn: Optional[Callable[[], ContextManager[GANLogger]]] = None,
+              result_metrics: Optional[Tuple[List, MetricsSequence]] = None,
+              results_info: Optional[ExperimentInfo] = None) -> Generator[Tuple[int, GAN], None, GAN]:
         """
         :param train_dataset: is expected to return tuples (x, y)
         :param val_dataset: is expected to return tuples (x, y)
@@ -196,4 +207,15 @@ class GanTrainer:
 
                 yield epoch, gan_model
 
-            return gan_model
+        # evaluating results
+        # TODO: probably this logic should be placed somewhere else
+        if result_metrics is not None and results_info is not None:
+            result = results_info.get_result()
+            # metrics
+            metrics_values = result_metrics[1](gan_model=gan_model, train_dataset=train_dataset,
+                                               val_dataset=val_dataset, val_data=val_data)
+            print(metrics_values)
+            fill_result(result, result_metrics[0], metrics_values)
+            results_info.save_result(result)
+
+        return gan_model

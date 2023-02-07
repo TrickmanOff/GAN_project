@@ -1,8 +1,9 @@
 import contextlib
 import os
 from enum import Enum, auto
-from typing import Tuple, Generator, Optional
+from typing import Tuple, Generator, Optional, Dict, List
 
+import numpy as np
 import torch
 
 import data
@@ -10,10 +11,9 @@ import logger
 from discriminators import SimplePhysicsDiscriminator, CaloganPhysicsDiscriminator
 from gan import GAN
 from generators import SimplePhysicsGenerator, CaloganPhysicsGenerator
-from metrics import CriticValuesDistributionMetric, Metric, MetricsSequence, LongitudualClusterAsymmetryMetric, \
-                    TransverseClusterAsymmetryMetric, ClusterLongitudualWidthMetric, ClusterTransverseWidthMetric, \
-                    DataStatistics, PhysicsPRDMetric
+from metrics import *
 from normalization import apply_normalization, SpectralNormalizer
+from results_storage import ResultsStorage
 from storage import ExperimentsStorage
 from train import Stepper, WganEpochTrainer, GanTrainer
 from wandb_logger import WandbCM
@@ -30,6 +30,17 @@ def init_storage() -> ExperimentsStorage:
 
 
 experiments_storage = init_storage()
+
+
+def init_results_storage() -> ResultsStorage:
+    # === config variables ===
+    results_dir = './results'
+    results_filename = './results.json'
+    # ========================
+    return ResultsStorage(storage_dir=results_dir, results_filename=results_filename)
+
+
+results_storage = init_results_storage()
 
 
 class Environment(Enum):
@@ -65,11 +76,35 @@ def form_metric() -> Metric:
         CriticValuesDistributionMetric(values_cnt=1000),
         DataStatistics(
             LongitudualClusterAsymmetryMetric(),
-            TransverseClusterAsymmetryMetric(),
-            ClusterLongitudualWidthMetric(),
-            ClusterTransverseWidthMetric(),
-            PhysicsPRDMetric(),
+            # TransverseClusterAsymmetryMetric(),
+            # ClusterLongitudualWidthMetric(),
+            # ClusterTransverseWidthMetric(),
+            # PhysicsPRDMetric(),
         ),
+    )
+
+
+def form_result_metrics() -> Tuple[List, MetricsSequence]:
+    # TODO: подумать, как можно сделать это удобнее
+    return (
+        [
+            [
+                'Longitudual Cluster Asymmetry KL',
+                # 'Transverse Cluster Asymmetry KL',
+                # 'Cluster Longitudual Width KL',
+                # 'Cluster Transverse Width KL',
+                'PRD-AUC'
+            ],
+        ],
+        MetricsSequence(
+            DataStatistics(
+                KLDivergence(LongitudualClusterAsymmetryMetric()),
+                # KLDivergence(TransverseClusterAsymmetryMetric()),
+                # KLDivergence(ClusterLongitudualWidthMetric()),
+                # KLDivergence(ClusterTransverseWidthMetric()),
+                AveragePRDAUCMetric(),
+            ),
+        )
     )
 
 
@@ -79,13 +114,14 @@ def form_gan_trainer(model_name: str, gan_model: Optional[GAN] = None, n_epochs:
     """
     logger_cm_fn = init_logger(model_name)
     metric = form_metric()
+    result_metrics = form_result_metrics()
 
     data_filepath = '../caloGAN_case11_5D_120K.npz'
     train_dataset = data.get_physics_dataset(data_filepath, train=True)
     val_dataset = data.get_physics_dataset(data_filepath, train=False)
     # for local testing
-    # val_size = int(0.3 * len(val_dataset))
-    # val_dataset = torch.utils.data.Subset(val_dataset, np.arange(val_size))
+    val_size = int(0.1 * len(val_dataset))
+    val_dataset = torch.utils.data.Subset(val_dataset, np.arange(val_size))
     # -------
     noise_dimension = 50
 
@@ -100,16 +136,17 @@ def form_gan_trainer(model_name: str, gan_model: Optional[GAN] = None, n_epochs:
         gan_model = GAN(generator, discriminator, uniform_noise_generator)
 
     generator_stepper = Stepper(
-        optimizer=torch.optim.RMSprop(generator.parameters(), lr=1e-5)
+        optimizer=torch.optim.RMSprop(generator.parameters(), lr=1e-4)
     )
 
     discriminator_stepper = Stepper(
-        optimizer=torch.optim.RMSprop(discriminator.parameters(), lr=1e-5)
+        optimizer=torch.optim.RMSprop(discriminator.parameters(), lr=1e-4)
     )
 
     epoch_trainer = WganEpochTrainer(n_critic=5, batch_size=100)
 
     model_dir = experiments_storage.get_model_dir(model_name)
+    experiment_info = results_storage.get_experiment_info(model_name)
     trainer = GanTrainer(model_dir=model_dir, use_saved_checkpoint=True, save_checkpoint_once_in_epoch=500)
     train_gan_generator = trainer.train(gan_model=gan_model,
                                         train_dataset=train_dataset, val_dataset=val_dataset,
@@ -118,7 +155,9 @@ def form_gan_trainer(model_name: str, gan_model: Optional[GAN] = None, n_epochs:
                                         epoch_trainer=epoch_trainer,
                                         n_epochs=n_epochs,
                                         metric=metric,
-                                        logger_cm_fn=logger_cm_fn)
+                                        logger_cm_fn=logger_cm_fn,
+                                        result_metrics=result_metrics,
+                                        results_info=experiment_info)
     return train_gan_generator
 
 
