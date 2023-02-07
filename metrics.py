@@ -2,6 +2,7 @@ from abc import abstractmethod
 from typing import Optional, Tuple, List, Any
 
 import numpy as np
+import pandas as pd
 import torch
 import torch.utils.data
 
@@ -9,6 +10,7 @@ from data import collate_fn, get_random_infinite_dataloader, move_batch_to, stac
 from device import get_local_device
 from gan import GAN
 from physical_metrics import calogan_metrics, calogan_prd
+from physical_metrics.calogan_prd import plot_pr_aucs
 
 
 class Metric:
@@ -161,9 +163,74 @@ class PhysicsPRDMetric(DataStatistic):
         return precisions, recalls
 
 
+class AveragePRDAUCMetric(DataStatistic):
+    def evaluate(self, gen_data: Any,
+                 val_data: Optional[Any] = None,
+                 **kwargs):
+        precisions, recalls = PhysicsPRDMetric().evaluate(gen_data=gen_data, val_data=val_data)
+        pr_aucs = plot_pr_aucs(precisions=precisions, recalls=recalls)
+        return np.mean(pr_aucs)
+
+
+def _split_into_bins(bins, vals):
+    """
+    return densities of shape (len(bins) + 1,)
+    """
+    bin_indices = np.searchsorted(bins, vals)
+    unique_vals, cnts = np.unique(bin_indices, return_counts=True)
+    all_cnts = np.zeros(len(bins) + 1)
+    all_cnts[unique_vals] = cnts
+
+    return all_cnts / len(vals)
+
+
+def _kl_div(true_probs, fake_probs):
+    """
+    true_probs, fake_probs must be of the same size.
+    They are assumed to be probabilities of some discrete random variables
+    return KL(true || fake)
+    """
+    calc_indices = true_probs != 0
+    if (fake_probs[calc_indices] == 0.).any():
+        return np.inf
+    else:
+        return (true_probs[calc_indices] * np.log(true_probs[calc_indices] / fake_probs[calc_indices])).mean()
+
+
+class KLDivergence(DataStatistic):
+    def __init__(self, statistic: DataStatistic, bins_cnt: int = 10):
+        super().__init__()
+        self.statistic = statistic
+        self.bins_cnt = bins_cnt
+
+    def evaluate(self, gen_data: Any,
+                 val_data: Optional[Any] = None,
+                 **kwargs):
+        """
+        делим val_samples на bin-ы по квантилям и считаем, что влево и вправо на бесконечности уходят по ещё одному bin-у
+        затем по дискретизированным согласно этим bin-ам величинам считаем дивергенцию
+        """
+        gen_samples, val_samples = self.statistic.evaluate(gen_data=gen_data, val_data=val_data)
+        _, bins = pd.qcut(np.hstack(gen_samples), q=self.bins_cnt, retbins=True)
+
+        val_probs = _split_into_bins(bins, val_samples)
+        gen_probs = _split_into_bins(bins, gen_samples)
+        return _kl_div(true_probs=val_probs, fake_probs=gen_probs)
+
+
 class MetricsSequence(Metric):
     def __init__(self, *metrics):
         self.metrics = metrics
 
     def evaluate(self, *args, **kwargs):
         return [metric(*args, **kwargs) for metric in self.metrics]
+
+
+__all__ = ['Metric', 'CriticValuesDistributionMetric',
+           'DataStatistic', 'DataStatistics',
+           'LongitudualClusterAsymmetryMetric', 'TransverseClusterAsymmetryMetric',
+           'ClusterLongitudualWidthMetric', 'ClusterTransverseWidthMetric',
+           'PhysicsPRDMetric',
+           'KLDivergence',
+           'MetricsSequence',
+           'AveragePRDAUCMetric']
