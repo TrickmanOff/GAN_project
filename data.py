@@ -39,7 +39,7 @@ def collate_fn(els_list: Sequence[Union[Tuple, int, torch.Tensor]]):
     elif isinstance(els_list[0], int):
         return torch.Tensor(els_list)
     elif isinstance(els_list[0], torch.Tensor):
-        return torch.stack(els_list)
+        return torch.stack(tuple(els_list))
     elif els_list[0] is None:
         return None
     else:

@@ -59,12 +59,12 @@ def get_wandb_token() -> str:
         return UserSecretsClient().get_secret('WANDB_TOKEN')
 
 
-def init_logger(model_name: str = ''):
+def init_logger(model_name: str = '', project_name='GANs'):
     config = logger.get_default_config()
     @contextlib.contextmanager
     def logger_cm():
         try:
-            with WandbCM(project_name='GANs', experiment_id=model_name, token=get_wandb_token(), config=config) as wandb_logger:
+            with WandbCM(project_name=project_name, experiment_id=model_name, token=get_wandb_token(), config=config) as wandb_logger:
                 yield wandb_logger
         finally:
             pass
