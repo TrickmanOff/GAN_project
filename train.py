@@ -164,10 +164,9 @@ class GanTrainer:
         :return:
         """
         gan_model.to(get_local_device())
+        inverse_to_initial_domain_fn = getattr(train_dataset, 'inverse_transform', None)
 
         epoch = 1
-
-        val_data = collate_fn(val_dataset)
 
         if self.use_saved_checkpoint:
             checkpoint = self.model_dir.get_checkpoint_state()
@@ -191,7 +190,7 @@ class GanTrainer:
                 if logger is not None:
                     if metric is not None:
                         metrics_results = metric(gan_model=gan_model, train_dataset=train_dataset, val_dataset=val_dataset,
-                                                 val_data=val_data)
+                                                 inverse_to_initial_domain_fn=inverse_to_initial_domain_fn)
                         log_metric(metric, results=metrics_results, logger=logger, period='epoch', period_index=epoch)
                     logger.commit(period='epoch')
                 epoch += 1
@@ -213,7 +212,8 @@ class GanTrainer:
             result = results_info.get_result()
             # metrics
             metrics_values = result_metrics[1](gan_model=gan_model, train_dataset=train_dataset,
-                                               val_dataset=val_dataset, val_data=val_data)
+                                               val_dataset=val_dataset,
+                                               inverse_to_initial_domain_fn=inverse_to_initial_domain_fn)
             print(metrics_values)
             fill_result(result, result_metrics[0], metrics_values)
             results_info.save_result(result)

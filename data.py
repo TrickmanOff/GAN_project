@@ -170,7 +170,19 @@ class PhysicsDataset(torch.utils.data.Dataset):
     """
     one element: (energy deposit, (point, momentum))
     """
-    def __init__(self, energy: torch.Tensor, point: torch.Tensor, momentum: torch.Tensor) -> None:
+    def __init__(self, energy: torch.Tensor, point: torch.Tensor, momentum: torch.Tensor,
+                 transform=None, inverse_transform=None) -> None:
+        """
+        TODO: указать сигнатуры transform и inverse_transform через typing
+        transform(energy, point, momentum) - tensors as batches or single
+        inverse_transform(energy, point, momentum)
+        """
+        self.transform = transform
+        self.inverse_transform = inverse_transform  # for outer use
+
+        if transform is not None:
+            energy = self.transform(energy)
+
         self.energy = energy
         self.point = point
         self.momentum = momentum
@@ -182,7 +194,17 @@ class PhysicsDataset(torch.utils.data.Dataset):
         return self.energy.shape[0]
 
 
-def get_physics_dataset(path: str, train: bool = True, val_ratio: float = 0.5) -> torch.utils.data.Dataset:
+# принимают batch-и x-ов
+def log1p_transform(x: torch.Tensor):
+    return torch.log1p(x)
+
+
+def log1p_inverse_transform(x: torch.Tensor):
+    return torch.expm1(x)
+
+
+def get_physics_dataset(path: str, train: bool = True, val_ratio: float = 0.5,
+                        log1p_energy: bool = True) -> torch.utils.data.Dataset:
     TRAIN_VAL_SPLIT_SEED = 0x3df3fa
 
     data_train = np.load(path)
@@ -199,9 +221,14 @@ def get_physics_dataset(path: str, train: bool = True, val_ratio: float = 0.5) -
     indices = train_indices if train else val_indices
 
     energy = torch.tensor(data_train['EnergyDeposit'][indices]).float()
-    # energy = torch.log1p(energy)  # !
     energy = torch.permute(energy, dims=(0, 3, 1, 2))
     point = torch.tensor(data_train['ParticlePoint'][:, :2][indices]).float()
     momentum = torch.tensor(data_train['ParticleMomentum'][indices]).float()
 
-    return PhysicsDataset(energy, point, momentum)
+    transform, inverse_transform = None, None
+    if log1p_energy:
+        transform = log1p_transform
+        inverse_transform = log1p_inverse_transform
+
+    return PhysicsDataset(energy, point, momentum,
+                          transform=transform, inverse_transform=inverse_transform)
