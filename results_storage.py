@@ -85,12 +85,15 @@ class ResultsStorage:
         exp_dirpath = self._get_exp_dirpath(exp_name)
         return ExperimentInfo(exp_dirpath, results_filename=self.results_filename)
 
-    def compare_metrics_df(self, exp_names: List[str]) -> pd.DataFrame:
+    def compare_metrics_df(self, exp_names: List[str], metrics_names: List[str]) -> pd.DataFrame:
         rows = []
 
         for exp_name in exp_names:
             exp_info = self.get_experiment_info(exp_name)
-            data_row = exp_info.get_result().metrics
+            metrics = exp_info.get_result().metrics
+            data_row = {
+                metric_name: metrics.get(metric_name, None) for metric_name in metrics_names
+            }
             data_row['name'] = exp_name
 
             rows.append(data_row)

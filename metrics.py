@@ -14,6 +14,8 @@ from physical_metrics.calogan_prd import plot_pr_aucs
 
 
 class Metric:
+    NAME = None
+
     def evaluate(self, *args, **kwargs):
         pass
 
@@ -169,6 +171,8 @@ class DataMetric(Metric):
 
 
 class CriticValuesDistributionMetric(DataMetric):
+    NAME = 'Critic values distribution'
+
     def __init__(self, values_cnt: int = 1000):
         super().__init__(initial_domain_data=False,
                          val_data_size=values_cnt,
@@ -220,17 +224,22 @@ class DataStatistic(DataMetric):
         return gen_value, self.cached_val_value
 
 
-class DataStatistics(DataMetric):
-    """Uses same generation results for all statistics"""
-    def __init__(self, *statistics: DataStatistic, **kwargs):
-        super().__init__(**kwargs)
-        self.statistics = statistics
+class MetricsSequence(Metric):
+    def __init__(self, *metrics):
+        self.metrics = metrics
 
-    def evaluate(self, gan_model: Optional[GAN] = None,
-                 gen_data: Optional[Any] = None,
-                 val_data: Optional[Any] = None,
-                 **kwargs):
-        return [statistic.evaluate(gen_data=gen_data, val_data=val_data) for statistic in self.statistics]
+    def evaluate(self, *args, **kwargs):
+        return [metric(*args, **kwargs) for metric in self.metrics]
+
+    def __iter__(self):
+        return iter(self.metrics)
+
+
+class DataStatistics(DataMetric, MetricsSequence):
+    """Uses the same generation results for all statistics"""
+    def __init__(self, *statistics: DataStatistic, **kwargs):
+        super(DataMetric).__init__(**kwargs)
+        super(MetricsSequence).__init__(*statistics)
 
 
 class PhysicsDataStatistics(DataStatistics):
@@ -259,24 +268,32 @@ class PhysicsDataStatistic(DataStatistic):
 
 
 class LongitudualClusterAsymmetryMetric(PhysicsDataStatistic):
+    NAME = 'Longitudual Cluster Asymmetry'
+
     def evaluate_statistic(self, data):
         EnergyDeposit, ParticlePoint, ParticleMomentum = split_prep_physics_data(data)
         return calogan_metrics.get_assymetry(EnergyDeposit, ParticleMomentum, ParticlePoint, orthog=False)
 
 
 class TransverseClusterAsymmetryMetric(PhysicsDataStatistic):
+    NAME = 'Transverse Cluster Asymmetry'
+
     def evaluate_statistic(self, data):
         EnergyDeposit, ParticlePoint, ParticleMomentum = split_prep_physics_data(data)
         return calogan_metrics.get_assymetry(EnergyDeposit, ParticleMomentum, ParticlePoint, orthog=True)
 
 
 class ClusterLongitudualWidthMetric(PhysicsDataStatistic):
+    NAME = 'Cluster Longitudual Width'
+
     def evaluate_statistic(self, data):
         EnergyDeposit, ParticlePoint, ParticleMomentum = split_prep_physics_data(data)
         return calogan_metrics.get_shower_width(EnergyDeposit, ParticleMomentum, ParticlePoint, orthog=False)
 
 
 class ClusterTransverseWidthMetric(PhysicsDataStatistic):
+    NAME = 'Cluster Transverse Width'
+
     def evaluate_statistic(self, data):
         EnergyDeposit, ParticlePoint, ParticleMomentum = split_prep_physics_data(data)
         return calogan_metrics.get_shower_width(EnergyDeposit, ParticleMomentum, ParticlePoint, orthog=True)
@@ -289,6 +306,8 @@ class PhysicsPRDMetric(PhysicsDataStatistic):
 
 
 class AveragePRDAUCMetric(PhysicsDataStatistic):
+    NAME = 'Average PRD-AUC'
+
     def evaluate(self, gen_data: Any,
                  val_data: Optional[Any] = None,
                  **kwargs):
@@ -323,10 +342,13 @@ def _kl_div(true_probs, fake_probs):
 
 
 class KLDivergence(DataStatistic):
+    NAME = 'KL Divergence'
+
     def __init__(self, statistic: DataStatistic, bins_cnt: int = 10):
         super().__init__()
         self.statistic = statistic
         self.bins_cnt = bins_cnt
+        self.NAME = self.NAME + ' of ' + statistic.NAME
 
     def evaluate(self, gen_data: Any,
                  val_data: Optional[Any] = None,
@@ -343,12 +365,23 @@ class KLDivergence(DataStatistic):
         return _kl_div(true_probs=val_probs, fake_probs=gen_probs)
 
 
-class MetricsSequence(Metric):
-    def __init__(self, *metrics):
-        self.metrics = metrics
+def _unravel_metric_results(unraveled: dict[str, Any], metric: Metric, results) -> None:
+    if isinstance(metric, MetricsSequence):
+        for metric, res in zip(metric, results):
+            _unravel_metric_results(unraveled, metric, res)
+    else:
+        unraveled[metric.NAME] = results
 
-    def evaluate(self, *args, **kwargs):
-        return [metric(*args, **kwargs) for metric in self.metrics]
+
+def unravel_metric_results(metric: Metric, results) -> dict[str, Any]:
+    """
+    преобразует результаты вычисленной metric в словарь
+    {<имя метрики>: значение}
+    нужно из-за MetricsSequence
+    """
+    unraveled: dict[str, Any] = {}
+    _unravel_metric_results(unraveled, metric, results)
+    return unraveled
 
 
 __all__ = ['Metric', 'CriticValuesDistributionMetric',
@@ -358,4 +391,5 @@ __all__ = ['Metric', 'CriticValuesDistributionMetric',
            'PhysicsPRDMetric', 'PhysicsDataStatistics', 'PhysicsDataStatistic',
            'KLDivergence',
            'MetricsSequence',
-           'AveragePRDAUCMetric']
+           'AveragePRDAUCMetric',
+           'unravel_metric_results']

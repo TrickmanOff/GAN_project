@@ -5,10 +5,12 @@ from typing import Tuple, Generator, Optional, Dict, List
 
 import numpy as np
 import torch
+import torch.utils.data
 
 import data
 import logger
 from discriminators import SimplePhysicsDiscriminator, CaloganPhysicsDiscriminator
+from evaluation import evaluate_model
 from gan import GAN
 from generators import SimplePhysicsGenerator, CaloganPhysicsGenerator
 from metrics import *
@@ -84,28 +86,21 @@ def form_metric() -> Metric:
     )
 
 
-def form_result_metrics() -> Tuple[List, MetricsSequence]:
-    # TODO: подумать, как можно сделать это удобнее
-    return (
-        [
-            [
-                'Longitudual Cluster Asymmetry KL',
-                # 'Transverse Cluster Asymmetry KL',
-                # 'Cluster Longitudual Width KL',
-                # 'Cluster Transverse Width KL',
-                'PRD-AUC'
-            ],
-        ],
-        MetricsSequence(
-            DataStatistics(
-                KLDivergence(LongitudualClusterAsymmetryMetric()),
-                # KLDivergence(TransverseClusterAsymmetryMetric()),
-                # KLDivergence(ClusterLongitudualWidthMetric()),
-                # KLDivergence(ClusterTransverseWidthMetric()),
-                AveragePRDAUCMetric(),
-            ),
-        )
-    )
+def form_result_metrics() -> Metric:
+    return MetricsSequence(
+                DataStatistics(
+                    KLDivergence(LongitudualClusterAsymmetryMetric()),
+                    # KLDivergence(TransverseClusterAsymmetryMetric()),
+                    # KLDivergence(ClusterLongitudualWidthMetric()),
+                    # KLDivergence(ClusterTransverseWidthMetric()),
+                    AveragePRDAUCMetric(),
+                ),
+            )
+
+
+def form_dataset(train: bool = False) -> torch.utils.data.Dataset:
+    data_filepath = '../caloGAN_case11_5D_120K.npz'
+    return data.UnifiedDatasetWrapper(data.get_physics_dataset(data_filepath, train=train))
 
 
 def form_gan_trainer(model_name: str, gan_model: Optional[GAN] = None, n_epochs: int = 100) -> Generator[Tuple[int, GAN], None, GAN]:
@@ -114,11 +109,10 @@ def form_gan_trainer(model_name: str, gan_model: Optional[GAN] = None, n_epochs:
     """
     logger_cm_fn = init_logger(model_name)
     metric = form_metric()
-    result_metrics = form_result_metrics()
 
-    data_filepath = '../caloGAN_case11_5D_120K.npz'
-    train_dataset = data.get_physics_dataset(data_filepath, train=True)
-    val_dataset = data.get_physics_dataset(data_filepath, train=False)
+    train_dataset = form_dataset(train=True)
+    val_dataset = form_dataset(train=False)
+
     # for local testing
     val_size = int(0.1 * len(val_dataset))
     val_dataset = torch.utils.data.Subset(val_dataset, np.arange(val_size))
@@ -146,7 +140,6 @@ def form_gan_trainer(model_name: str, gan_model: Optional[GAN] = None, n_epochs:
     epoch_trainer = WganEpochTrainer(n_critic=5, batch_size=100)
 
     model_dir = experiments_storage.get_model_dir(model_name)
-    experiment_info = results_storage.get_experiment_info(model_name)
     trainer = GanTrainer(model_dir=model_dir, use_saved_checkpoint=True, save_checkpoint_once_in_epoch=500)
     train_gan_generator = trainer.train(gan_model=gan_model,
                                         train_dataset=train_dataset, val_dataset=val_dataset,
@@ -155,9 +148,7 @@ def form_gan_trainer(model_name: str, gan_model: Optional[GAN] = None, n_epochs:
                                         epoch_trainer=epoch_trainer,
                                         n_epochs=n_epochs,
                                         metric=metric,
-                                        logger_cm_fn=logger_cm_fn,
-                                        result_metrics=result_metrics,
-                                        results_info=experiment_info)
+                                        logger_cm_fn=logger_cm_fn)
     return train_gan_generator
 
 
@@ -174,6 +165,10 @@ def main():
     model_name = 'physics_test'
     gan_trainer = form_gan_trainer(model_name=model_name, n_epochs=100)
     gan_model = call_generator(gan_trainer)
+    # evaluate the trained model
+    result_metrics = form_result_metrics()
+    val_dataset = form_dataset(train=False)
+    evaluate_model(model_name, gan_model, val_dataset, result_metrics, storage=results_storage)
     # do sth with gan model
 
 
