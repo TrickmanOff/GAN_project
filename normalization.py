@@ -49,7 +49,8 @@ class ClippingNormalizer(Normalizer):
         Clip in range [-clip_c, clip_c]
         """
         super().__init__(module)
-        self.clip_c = clip_c
+        self.clip_c = nn.Parameter(torch.Tensor([clip_c]))
+        self.clip_c.requires_grad = False
 
         if type(module) not in [nn.Linear]:
             raise ModuleNotSupported
@@ -61,14 +62,6 @@ class ClippingNormalizer(Normalizer):
 
     def forward(self, X: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         return self.module(X, *args, **kwargs)
-
-    def state_dict(self, *args, **kwargs) -> Dict[str, Any]:
-        return {
-            'clip_c': self.clip_c
-        }
-
-    def load_state_dict(self, state_dict: Dict[str, Any], strict: bool = True) -> None:
-        self.clip_c = state_dict['clip_c']
 
 
 class SpectralNormalizer(Normalizer):
@@ -84,8 +77,10 @@ class SpectralNormalizer(Normalizer):
             raise ModuleNotSupported
 
         self.weight_matrix_shape = self.weight_matrix_fn().shape
-        self.u = 2*torch.rand(self.weight_matrix_shape[0], 1, requires_grad=False)-1
-        self.v = 2*torch.rand(self.weight_matrix_shape[1], 1, requires_grad=False)-1
+        self.u = nn.Parameter(2*torch.rand(self.weight_matrix_shape[0], 1, requires_grad=False)-1)
+        self.v = nn.Parameter(2*torch.rand(self.weight_matrix_shape[1], 1, requires_grad=False)-1)
+        self.u.requires_grad = False
+        self.v.requires_grad = False
 
     def _sync_device(self) -> None:
         device = self.weight_matrix_fn().device
@@ -100,22 +95,12 @@ class SpectralNormalizer(Normalizer):
         self._sync_device()
         with torch.no_grad():
             W = self.weight_matrix_fn()
-            self.v = W.T @ self.u / torch.linalg.norm(W.T @ self.u)
-            self.u = W @ self.v / torch.linalg.norm(W @ self.v)
+            self.v.data = W.T @ self.u / torch.linalg.norm(W.T @ self.u)
+            self.u.data = W @ self.v / torch.linalg.norm(W @ self.v)
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
         sing_approx = self.calc_singular_value_approx()
         return self.module(X) / sing_approx
-
-    def state_dict(self, *args, **kwargs) -> Dict[str, Any]:
-        return {
-            'u': self.u,
-            'v': self.v
-        }
-
-    def load_state_dict(self, state_dict: Dict[str, Any], strict: bool = True) -> None:
-        self.u = state_dict['u']
-        self.v = state_dict['v']
 
 
 def apply_normalization(module: nn.Module,
