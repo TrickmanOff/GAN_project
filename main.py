@@ -75,27 +75,30 @@ def init_logger(model_name: str = '', project_name='GANs'):
 
 def form_metric() -> Metric:
     return MetricsSequence(
-        CriticValuesDistributionMetric(values_cnt=1000),
-        DataStatistics(
-            LongitudualClusterAsymmetryMetric(),
+        # CriticValuesDistributionMetric(values_cnt=1000),
+        PhysicsDataStatistics(
+            # LongitudualClusterAsymmetryMetric(),
             # TransverseClusterAsymmetryMetric(),
             # ClusterLongitudualWidthMetric(),
             # ClusterTransverseWidthMetric(),
             # PhysicsPRDMetric(),
             # PhysicsPRDBinsMetric(),
+            ConditionBinsMetric(metric=AveragePRDAUCMetric(),
+                                dim_bins=torch.Tensor([3, 3]),
+                                condition_index=0),
         ),
     )
 
 
 def form_result_metrics() -> Metric:
     return MetricsSequence(
-                DataStatistics(
-                    KLDivergence(LongitudualClusterAsymmetryMetric()),
+                # DataStatistics(
+                    # KLDivergence(LongitudualClusterAsymmetryMetric()),
                     # KLDivergence(TransverseClusterAsymmetryMetric()),
                     # KLDivergence(ClusterLongitudualWidthMetric()),
                     # KLDivergence(ClusterTransverseWidthMetric()),
-                    AveragePRDAUCMetric(),
-                ),
+                    # AveragePRDAUCMetric(),
+                # ),
             )
 
 

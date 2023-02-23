@@ -67,16 +67,19 @@ def log_metric(metric: Metric, results: Any, logger: GANLogger, period: str, per
     elif isinstance(metric, DataStatistics):
         for statistic, res in zip(metric.statistics, results):
             log_metric(statistic, res, logger, period=period, period_index=period_index)
+    elif isinstance(metric, ConditionBinsMetric):
+        metric_name = metric.metric.NAME
+        for bin_i, value in enumerate(results):
+            logger.log_metrics(data={f'bin #{bin_i}: {metric_name}': value}, period=period,
+                               period_index=period_index, commit=False)
+        logger.log_metrics(data={f'bins avg: {metric_name}': np.mean(results)}, period=period,
+                           period_index=period_index, commit=False)
     elif isinstance(metric, DataStatistic):
         if type(metric) == PhysicsPRDMetric:
             precisions, recalls = results
             pr_aucs = plot_pr_aucs(precisions=precisions, recalls=recalls)
             logger.log_pyplot('PRD', period=period, period_index=period_index)
             logger.log_metrics(data={'PRD PR-AUC': np.mean(pr_aucs)}, period=period, period_index=period_index, commit=False)
-        elif type(metric) == PhysicsPRDBinsMetric:
-            for bin_i, prd_auc in enumerate(results):
-                logger.log_metrics(data={f'bin #{bin_i}: PRD PR-AUC': prd_auc}, period=period, period_index=period_index, commit=False)
-            logger.log_metrics(data={f'bins avg: PRD-AUC': np.mean(results)}, period=period, period_index=period_index, commit=False)
         elif type(metric) in DISTRIBUTIONS_LOG_INFO:
             dist_log_info = DISTRIBUTIONS_LOG_INFO[type(metric)]
 

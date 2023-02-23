@@ -15,6 +15,19 @@ from physical_metrics import calogan_metrics, calogan_prd
 from physical_metrics.calogan_prd import plot_pr_aucs
 
 
+"""
+Each metric has 2 main methods:
+- prepare_args(**kwargs)
+  Prepares and filters the given arguments (all possible) and returns the dict of kwargs
+- evaluate(*args, **kwargs)
+  Evaluates the value of a metric
+  
+
+- __call__()
+  prepare_args + evaluate
+"""
+
+
 class Metric:
     NAME = None
 
@@ -316,8 +329,12 @@ class AveragePRDAUCMetric(PhysicsDataStatistic):
     def evaluate(self, gen_data: Any,
                  val_data: Optional[Any] = None,
                  **kwargs):
+        if gen_data is None or val_data is None:
+            return 0.  # zero recall or zero precision respectively
+
         precisions, recalls = PhysicsPRDMetric().evaluate(gen_data=gen_data, val_data=val_data)
         pr_aucs = plot_pr_aucs(precisions=precisions, recalls=recalls)
+        plt.close()
         return np.mean(pr_aucs)
 
 
@@ -383,34 +400,35 @@ def split_into_bins(data: Union[torch.Tensor, Tuple[torch.Tensor]], condition_da
     return data_bins
 
 
-class PhysicsPRDBinsMetric(PhysicsDataStatistic):
-    def __init__(self, dim_bins=torch.Tensor([3, 3])):
+class ConditionBinsMetric(Metric):
+    def __init__(self, metric: DataMetric, dim_bins: torch.Tensor, condition_index: Optional[int] = None):
         """
-        делит по points
+        :param condition_index: the index of condition element to split if condition is a tuple
+        not used if it is not a tuple
         """
         super().__init__()
         self.dim_bins = dim_bins
+        self.metric = metric
+        self.condition_index = condition_index
+
+    def prepare_args(self, **kwargs):
+        return self.metric.prepare_args(**kwargs)
 
     def evaluate(self, gen_data, val_data, **kwargs):
-        points = val_data[1][0]
         gen_x, val_x = gen_data[0], val_data[0]
-
-        splitted_data = split_into_bins((gen_x, val_x), condition_data=points,
+        val_y = val_data[1]
+        if isinstance(val_y, tuple):
+            split_condition = val_y[self.condition_index]
+        else:
+            split_condition = val_y
+        splitted_data = split_into_bins((gen_x, val_x), condition_data=split_condition,
                                         dim_bins=self.dim_bins)
 
-        prd_aucs = []
-        # TODO: add PRD curve to log
+        results = []
         for gen_bin, val_bin in tqdm(splitted_data):
-            if gen_bin is None or val_bin is None:
-                prd_auc = 0.  # zero recall or zero precision respectively
-            else:
-                precisions, recalls = calogan_prd.calc_pr_rec(data_real=val_bin, data_fake=gen_bin)
-                cur_prd_aucs = plot_pr_aucs(precisions=precisions, recalls=recalls)
-                plt.close()
-                prd_auc = np.mean(cur_prd_aucs)
-            prd_aucs.append(prd_auc)
-
-        return prd_aucs
+            metric_result = self.metric.evaluate(gen_data=(gen_bin, None), val_data=(val_bin, None))
+            results.append(metric_result)
+        return results
 
 
 def _split_into_bins(bins, vals):
@@ -490,4 +508,5 @@ __all__ = ['Metric', 'CriticValuesDistributionMetric',
            'MetricsSequence',
            'AveragePRDAUCMetric',
            'unravel_metric_results',
-           'PhysicsPRDBinsMetric']
+           'PhysicsPRDBinsMetric',
+           'ConditionBinsMetric']
