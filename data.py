@@ -112,6 +112,7 @@ class UnifiedDatasetWrapper(torch.utils.data.Dataset):
     """
     def __init__(self, dataset: torch.utils.data.Dataset):
         self.dataset = dataset
+        self.inverse_transform = dataset.inverse_transform
 
     def __len__(self) -> int:
         return len(self.dataset)

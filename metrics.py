@@ -1,10 +1,12 @@
 from abc import abstractmethod
-from typing import Optional, Tuple, List, Any, Generator, Iterable
+from typing import Optional, Tuple, List, Any, Generator, Iterable, Union, Dict
 
 import numpy as np
 import pandas as pd
 import torch
 import torch.utils.data
+from matplotlib import pyplot as plt
+from tqdm import tqdm
 
 from data import collate_fn, get_random_infinite_dataloader, move_batch_to, stack_batches
 from device import get_local_device
@@ -235,11 +237,14 @@ class MetricsSequence(Metric):
         return iter(self.metrics)
 
 
-class DataStatistics(DataMetric, MetricsSequence):
+class DataStatistics(DataMetric):
     """Uses the same generation results for all statistics"""
     def __init__(self, *statistics: DataStatistic, **kwargs):
-        super(DataMetric).__init__(**kwargs)
-        super(MetricsSequence).__init__(*statistics)
+        DataMetric.__init__(self, **kwargs)
+        self.statistics = statistics
+
+    def evaluate(self, *args, **kwargs):
+        return [statistic.evaluate(*args, **kwargs) for statistic in self.statistics]
 
 
 class PhysicsDataStatistics(DataStatistics):
@@ -316,6 +321,98 @@ class AveragePRDAUCMetric(PhysicsDataStatistic):
         return np.mean(pr_aucs)
 
 
+def select_indices(data: Union[torch.Tensor, Tuple[torch.Tensor]], indices):
+    if isinstance(data, tuple):
+        return tuple(select_indices(t, indices) for t in data)
+    else:
+        return data[indices]
+
+
+def split_into_bins(data: Union[torch.Tensor, Tuple[torch.Tensor]], condition_data: torch.Tensor,
+                    dim_bins: torch.Tensor,
+                    ret_bins: bool = False):
+    """
+    если ret_bins == True, то возвращается (bins_codes, bins), где bins - массив ограничений каждого bin'а
+    TODO
+
+    dim_bins - кол-во bin-ов для каждой размерности
+    разделяет data по bin-ам
+
+    dim_bins.shape == condition_data.shape[1:]
+
+    возвращает разбиение data
+    """
+
+    mins = condition_data.min(dim=0)[0]
+    maxs = condition_data.max(dim=0)[0]
+    steps = (maxs - mins) / dim_bins
+
+    # я не знаю, как это можно сделать лучше
+    bins_mul = [1]
+    for el in dim_bins.flatten()[1:]:
+        bins_mul.append(int(bins_mul[-1] * el))
+    bins_mul = torch.LongTensor(bins_mul, ).reshape(dim_bins.shape)
+    # ------
+
+    dims_codes = (condition_data - mins) // steps
+    dims_codes = torch.maximum(dims_codes, torch.zeros(dims_codes.shape))
+    dims_codes = torch.minimum(dims_codes, dim_bins - 1)
+    dims_codes = dims_codes.long()
+
+    condition_dims = tuple(range(1, len(condition_data.shape)))
+    bins_codes = (dims_codes * bins_mul).sum(
+        dim=condition_dims)  # номера bin-ов, в которых лежат данные
+
+    # разбиваем data на bin'ы
+    data_bins = []
+    max_bin_index = int(dim_bins.prod())
+    all_indices = torch.arange(len(condition_data))
+    for bin_index in range(max_bin_index):
+        cur_indices = all_indices[bins_codes == bin_index]
+        if len(cur_indices) == 0:
+            cur_bin = None
+        else:
+            cur_bin = select_indices(data, cur_indices)
+        data_bins.append(cur_bin)
+
+    # сами бины
+    # TODO
+    if ret_bins:
+        raise NotImplemented
+
+    return data_bins
+
+
+class PhysicsPRDBinsMetric(PhysicsDataStatistic):
+    def __init__(self, dim_bins=torch.Tensor([3, 3])):
+        """
+        делит по points
+        """
+        super().__init__()
+        self.dim_bins = dim_bins
+
+    def evaluate(self, gen_data, val_data, **kwargs):
+        points = val_data[1][0]
+        gen_x, val_x = gen_data[0], val_data[0]
+
+        splitted_data = split_into_bins((gen_x, val_x), condition_data=points,
+                                        dim_bins=self.dim_bins)
+
+        prd_aucs = []
+        # TODO: add PRD curve to log
+        for gen_bin, val_bin in tqdm(splitted_data):
+            if gen_bin is None or val_bin is None:
+                prd_auc = 0.  # zero recall or zero precision respectively
+            else:
+                precisions, recalls = calogan_prd.calc_pr_rec(data_real=val_bin, data_fake=gen_bin)
+                cur_prd_aucs = plot_pr_aucs(precisions=precisions, recalls=recalls)
+                plt.close()
+                prd_auc = np.mean(cur_prd_aucs)
+            prd_aucs.append(prd_auc)
+
+        return prd_aucs
+
+
 def _split_into_bins(bins, vals):
     """
     return densities of shape (len(bins) + 1,)
@@ -365,7 +462,7 @@ class KLDivergence(DataStatistic):
         return _kl_div(true_probs=val_probs, fake_probs=gen_probs)
 
 
-def _unravel_metric_results(unraveled: dict[str, Any], metric: Metric, results) -> None:
+def _unravel_metric_results(unraveled: Dict[str, Any], metric: Metric, results) -> None:
     if isinstance(metric, MetricsSequence):
         for metric, res in zip(metric, results):
             _unravel_metric_results(unraveled, metric, res)
@@ -373,13 +470,13 @@ def _unravel_metric_results(unraveled: dict[str, Any], metric: Metric, results) 
         unraveled[metric.NAME] = results
 
 
-def unravel_metric_results(metric: Metric, results) -> dict[str, Any]:
+def unravel_metric_results(metric: Metric, results) -> Dict[str, Any]:
     """
     преобразует результаты вычисленной metric в словарь
     {<имя метрики>: значение}
     нужно из-за MetricsSequence
     """
-    unraveled: dict[str, Any] = {}
+    unraveled: Dict[str, Any] = {}
     _unravel_metric_results(unraveled, metric, results)
     return unraveled
 
@@ -392,4 +489,5 @@ __all__ = ['Metric', 'CriticValuesDistributionMetric',
            'KLDivergence',
            'MetricsSequence',
            'AveragePRDAUCMetric',
-           'unravel_metric_results']
+           'unravel_metric_results',
+           'PhysicsPRDBinsMetric']

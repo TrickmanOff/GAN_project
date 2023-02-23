@@ -82,6 +82,7 @@ def form_metric() -> Metric:
             # ClusterLongitudualWidthMetric(),
             # ClusterTransverseWidthMetric(),
             # PhysicsPRDMetric(),
+            # PhysicsPRDBinsMetric(),
         ),
     )
 

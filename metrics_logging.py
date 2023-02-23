@@ -5,11 +5,7 @@ from typing import Any, Union, Tuple, Optional, Dict, Type
 import numpy as np
 
 from logger import GANLogger
-from metrics import Metric, MetricsSequence, CriticValuesDistributionMetric, \
-                    LongitudualClusterAsymmetryMetric, DataStatistic, DataStatistics, \
-                    TransverseClusterAsymmetryMetric, ClusterLongitudualWidthMetric, \
-                    ClusterTransverseWidthMetric, \
-                    PhysicsPRDMetric
+from metrics import *
 from physical_metrics.calogan_prd import plot_pr_aucs
 
 """
@@ -60,6 +56,9 @@ def log_metric(metric: Metric, results: Any, logger: GANLogger, period: str, per
     if isinstance(metric, MetricsSequence):
         for metric, result in zip(metric.metrics, results):
             log_metric(metric, result, logger, period=period, period_index=period_index)
+    elif isinstance(metric, DataStatistics):
+        for statistic, result in zip(metric.statistics, results):
+            log_metric(statistic, result, logger, period=period, period_index=period_index)
     elif isinstance(metric, CriticValuesDistributionMetric):
         critic_vals_true: np.ndarray
         critic_vals_gen: np.ndarray
@@ -74,6 +73,10 @@ def log_metric(metric: Metric, results: Any, logger: GANLogger, period: str, per
             pr_aucs = plot_pr_aucs(precisions=precisions, recalls=recalls)
             logger.log_pyplot('PRD', period=period, period_index=period_index)
             logger.log_metrics(data={'PRD PR-AUC': np.mean(pr_aucs)}, period=period, period_index=period_index, commit=False)
+        elif type(metric) == PhysicsPRDBinsMetric:
+            for bin_i, prd_auc in enumerate(results):
+                logger.log_metrics(data={f'bin #{bin_i}: PRD PR-AUC': prd_auc}, period=period, period_index=period_index, commit=False)
+            logger.log_metrics(data={f'bins avg: PRD-AUC': np.mean(results)}, period=period, period_index=period_index, commit=False)
         elif type(metric) in DISTRIBUTIONS_LOG_INFO:
             dist_log_info = DISTRIBUTIONS_LOG_INFO[type(metric)]
 

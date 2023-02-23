@@ -165,7 +165,6 @@ class GanTrainer:
         """
         gan_model.to(get_local_device())
         inverse_to_initial_domain_fn = getattr(train_dataset, 'inverse_transform', None)
-
         epoch = 1
 
         if self.use_saved_checkpoint:
