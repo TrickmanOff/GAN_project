@@ -88,7 +88,8 @@ class WganEpochTrainer(GanEpochTrainer):
 
             return gen_batch_x, real_batch_x, gen_batch_y, real_batch_y
 
-        was_loss_approx_total = 0.
+        critic_loss_total = 0.
+        gen_loss_total = 0.
 
         # generator_batch = next(random_dataloader_iter)  # for local testing
         # for batch_index in range(1):                    # -----------------
@@ -107,6 +108,9 @@ class WganEpochTrainer(GanEpochTrainer):
                 critic_stepper.step()
                 critic_stepper.optimizer.zero_grad()
                 update_normalizers_stats(gan_model.discriminator)
+
+            critic_loss_total += loss.item() * len(gen_batch_x)
+
             gan_model.generator.requires_grad_(True)
 
             # generator training
@@ -115,19 +119,22 @@ class WganEpochTrainer(GanEpochTrainer):
 
             observations = (gan_model.discriminator(real_batch_x, real_batch_y) -
                             gan_model.discriminator(gen_batch_x, gen_batch_y))
-            was_loss_approx = observations.mean()
-            was_loss_approx_total += observations.sum().item()
-            was_loss_approx.backward()
+            gen_loss = observations.mean()
+            gen_loss_total += gen_loss * len(gen_batch_x)
+            gen_loss.backward()
             generator_stepper.step()
             generator_stepper.optimizer.zero_grad()
             gan_model.discriminator.requires_grad_(True)
 
             if logger is not None:
-                logger.log_metrics(data={'train/generator/loss': was_loss_approx.item()},
+                logger.log_metrics(data={'train/generator/loss': gen_loss.item()},
                                    period='batch', period_index=batch_index+1, commit=False)
 
         if logger is not None:
-            logger.log_metrics(data={'train/generator/loss': was_loss_approx_total / len(train_dataset)},
+            logger.log_metrics(data={'train/critic/loss': critic_loss_total / len(train_dataset)},
+                               period='epoch',
+                               commit=False)
+            logger.log_metrics(data={'train/generator/loss': gen_loss_total / len(train_dataset)},
                                period='epoch',
                                commit=False)  # period_index was specified by the caller
 
