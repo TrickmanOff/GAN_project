@@ -14,6 +14,7 @@ from logger import GANLogger
 from metrics import Metric, MetricsSequence
 from metrics_logging import log_metric
 from normalization import update_normalizers_stats
+from predicates import TrainPredicate
 from results_storage import ExperimentInfo, Result
 from storage import ModelDir
 
@@ -161,6 +162,7 @@ class GanTrainer:
               epoch_trainer: GanEpochTrainer,
               n_epochs: int = 100,
               metric: Optional[Metric] = None,
+              metric_predicate: Optional[TrainPredicate] = None,
               logger_cm_fn: Optional[Callable[[], ContextManager[GANLogger]]] = None,
               result_metrics: Optional[Tuple[List, MetricsSequence]] = None,
               results_info: Optional[ExperimentInfo] = None) -> Generator[Tuple[int, GAN], None, GAN]:
@@ -168,6 +170,7 @@ class GanTrainer:
         :param train_dataset: is expected to return tuples (x, y)
         :param val_dataset: is expected to return tuples (x, y)
         :param metric: metric that will be calculated and logged (only if logger is given) after each epoch
+        :param metric_predicate: `metric` is calculated if and only if `metric_predicate` returns True
         :return:
         """
         gan_model.to(get_local_device())
@@ -194,7 +197,7 @@ class GanTrainer:
                                           logger=logger)
 
                 if logger is not None:
-                    if metric is not None:
+                    if metric is not None and (metric_predicate is None or metric_predicate(epoch=epoch)):
                         metrics_results = metric(gan_model=gan_model, train_dataset=train_dataset, val_dataset=val_dataset,
                                                  inverse_to_initial_domain_fn=inverse_to_initial_domain_fn)
                         log_metric(metric, results=metrics_results, logger=logger, period='epoch', period_index=epoch)

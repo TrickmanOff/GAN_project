@@ -16,6 +16,7 @@ from generators import SimplePhysicsGenerator, CaloganPhysicsGenerator
 from metrics import *
 from custom_metrics import *
 from normalization import apply_normalization, SpectralNormalizer
+from predicates import TrainPredicate, IgnoreFirstNEpochsPredicate, EachNthEpochPredicate
 from results_storage import ResultsStorage
 from storage import ExperimentsStorage
 from train import Stepper, WganEpochTrainer, GanTrainer
@@ -87,6 +88,10 @@ def form_metric() -> Metric:
     )
 
 
+def form_metric_predicate() -> TrainPredicate:
+    return IgnoreFirstNEpochsPredicate(20) & EachNthEpochPredicate(5)
+
+
 def form_result_metrics() -> Metric:
     return MetricsSequence(
                 # DataStatistics(
@@ -110,6 +115,7 @@ def form_gan_trainer(model_name: str, gan_model: Optional[GAN] = None, n_epochs:
     """
     logger_cm_fn = init_logger(model_name)
     metric = form_metric()
+    metric_predicate = form_metric_predicate()
 
     train_dataset = form_dataset(train=True)
     val_dataset = form_dataset(train=False)
@@ -148,7 +154,7 @@ def form_gan_trainer(model_name: str, gan_model: Optional[GAN] = None, n_epochs:
                                         critic_stepper=discriminator_stepper,
                                         epoch_trainer=epoch_trainer,
                                         n_epochs=n_epochs,
-                                        metric=metric,
+                                        metric=metric, metric_predicate=metric_predicate,
                                         logger_cm_fn=logger_cm_fn)
     return train_gan_generator
 
