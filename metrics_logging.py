@@ -53,7 +53,9 @@ def log_metric(metric: Metric, results: Any, logger: GANLogger, period: str, per
     :param metric:
     :param logger:
     """
-    if isinstance(metric, MetricsSequence):
+    if isinstance(metric, TransformData):
+        log_metric(metric.metric, results, logger, period=period, period_index=period_index)
+    elif isinstance(metric, MetricsSequence):
         for metric, result in zip(metric.metrics, results):
             log_metric(metric, result, logger, period=period, period_index=period_index)
     elif isinstance(metric, DataStatistics):
@@ -78,8 +80,8 @@ def log_metric(metric: Metric, results: Any, logger: GANLogger, period: str, per
         if type(metric) == PhysicsPRDMetric:
             precisions, recalls = results
             pr_aucs = plot_pr_aucs(precisions=precisions, recalls=recalls)
-            logger.log_pyplot('PRD', period=period, period_index=period_index)
-            logger.log_metrics(data={'PRD PR-AUC': np.mean(pr_aucs)}, period=period, period_index=period_index, commit=False)
+            logger.log_pyplot(metric.NAME, period=period, period_index=period_index)
+            logger.log_metrics(data={metric.NAME + ' PR-AUC': np.mean(pr_aucs)}, period=period, period_index=period_index, commit=False)
         elif type(metric) in DISTRIBUTIONS_LOG_INFO:
             dist_log_info = DISTRIBUTIONS_LOG_INFO[type(metric)]
 

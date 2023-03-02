@@ -14,6 +14,7 @@ from evaluation import evaluate_model
 from gan import GAN
 from generators import SimplePhysicsGenerator, CaloganPhysicsGenerator
 from metrics import *
+from custom_metrics import *
 from normalization import apply_normalization, SpectralNormalizer
 from results_storage import ResultsStorage
 from storage import ExperimentsStorage
@@ -75,17 +76,13 @@ def init_logger(model_name: str = '', project_name='GANs'):
 
 def form_metric() -> Metric:
     return MetricsSequence(
-        # CriticValuesDistributionMetric(values_cnt=1000),
+        CriticValuesDistributionMetric(values_cnt=1000),
         PhysicsDataStatistics(
-            # LongitudualClusterAsymmetryMetric(),
-            # TransverseClusterAsymmetryMetric(),
-            # ClusterLongitudualWidthMetric(),
-            # ClusterTransverseWidthMetric(),
-            # PhysicsPRDMetric(),
-            # PhysicsPRDBinsMetric(),
-            ConditionBinsMetric(metric=AveragePRDAUCMetric(),
-                                dim_bins=torch.Tensor([3, 3]),
-                                condition_index=0),
+            *[statistic_cls() for statistic_cls in PHYS_STATISTICS],
+            create_prd_energy_embed(),
+            create_conditional_prd_energy_embed(),
+            create_prd_physics_statistics(),
+            create_conditional_prd_physics_statistics(),
         ),
     )
 

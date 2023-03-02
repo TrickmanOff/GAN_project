@@ -73,14 +73,12 @@ embedder_state_path = pathlib.Path(__file__).parent / pathlib.Path('./embedder_s
 embedder = load_embedder(str(embedder_state_path))
 
 
-def calc_pr_rec(data_real: torch.Tensor, data_fake: torch.Tensor, num_clusters=20, num_runs=10, NUM_RUNS=10,
-                show_progress_bar: bool = False) -> Tuple[List[np.ndarray], List[np.ndarray]]:
-    """
-    data_real, data_fake - 'EnergyDeposit's
-    """
-    data_real_embeds = embedder.get_encoding(data_real.view(-1, 1, 30, 30)).detach().numpy()
-    data_fake_embeds = embedder.get_encoding(data_fake.view(-1, 1, 30, 30)).detach().numpy()
+def get_energy_embedding(data):
+    return embedder.get_encoding(data[0].view(-1, 1, 30, 30)).detach().numpy(), data[1]
 
+
+def calc_pr_rec_from_embeds(data_real_embeds: torch.Tensor, data_fake_embeds: torch.Tensor, num_clusters=20, num_runs=10, NUM_RUNS=10,
+                            show_progress_bar: bool = False) -> Tuple[List[np.ndarray], List[np.ndarray]]:
     precisions = []
     recalls = []
     for _ in tqdm(range(NUM_RUNS)) if show_progress_bar else range(NUM_RUNS):

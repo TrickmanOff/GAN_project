@@ -1,5 +1,5 @@
 from abc import abstractmethod
-from typing import Optional, Tuple, List, Any, Generator, Iterable, Union, Dict
+from typing import Optional, Tuple, Any, Generator, Iterable, Union, Dict, Callable
 
 import numpy as np
 import pandas as pd
@@ -8,11 +8,11 @@ import torch.utils.data
 from matplotlib import pyplot as plt
 from tqdm import tqdm
 
-from data import collate_fn, get_random_infinite_dataloader, move_batch_to, stack_batches
+from data import collate_fn, move_batch_to, stack_batches
 from device import get_local_device
 from gan import GAN
 from physical_metrics import calogan_metrics, calogan_prd
-from physical_metrics.calogan_prd import plot_pr_aucs
+from physical_metrics.calogan_prd import plot_pr_aucs, get_energy_embedding
 
 
 """
@@ -185,6 +185,21 @@ class DataMetric(Metric):
         }
 
 
+class TransformData(DataMetric):
+    def __init__(self, metric: DataMetric, transform_fn: Callable):
+        """
+        :param transform_fn: функтор, работающий с полным batch-ом (X, Y)
+        """
+        super().__init__()
+        self.metric = metric
+        self.transform_fn = transform_fn
+
+    def evaluate(self, gen_data, val_data, **kwargs):
+        gen_data = self.transform_fn(gen_data)
+        val_data = self.transform_fn(val_data)
+        return self.metric.evaluate(gen_data=gen_data, val_data=val_data, **kwargs)
+
+
 class CriticValuesDistributionMetric(DataMetric):
     NAME = 'Critic values distribution'
 
@@ -288,7 +303,8 @@ class PhysicsDataStatistic(DataStatistic):
 class LongitudualClusterAsymmetryMetric(PhysicsDataStatistic):
     NAME = 'Longitudual Cluster Asymmetry'
 
-    def evaluate_statistic(self, data):
+    @staticmethod
+    def evaluate_statistic(data):
         EnergyDeposit, ParticlePoint, ParticleMomentum = split_prep_physics_data(data)
         return calogan_metrics.get_assymetry(EnergyDeposit, ParticleMomentum, ParticlePoint, orthog=False)
 
@@ -296,7 +312,8 @@ class LongitudualClusterAsymmetryMetric(PhysicsDataStatistic):
 class TransverseClusterAsymmetryMetric(PhysicsDataStatistic):
     NAME = 'Transverse Cluster Asymmetry'
 
-    def evaluate_statistic(self, data):
+    @staticmethod
+    def evaluate_statistic(data):
         EnergyDeposit, ParticlePoint, ParticleMomentum = split_prep_physics_data(data)
         return calogan_metrics.get_assymetry(EnergyDeposit, ParticleMomentum, ParticlePoint, orthog=True)
 
@@ -304,7 +321,8 @@ class TransverseClusterAsymmetryMetric(PhysicsDataStatistic):
 class ClusterLongitudualWidthMetric(PhysicsDataStatistic):
     NAME = 'Cluster Longitudual Width'
 
-    def evaluate_statistic(self, data):
+    @staticmethod
+    def evaluate_statistic(data):
         EnergyDeposit, ParticlePoint, ParticleMomentum = split_prep_physics_data(data)
         return calogan_metrics.get_shower_width(EnergyDeposit, ParticleMomentum, ParticlePoint, orthog=False)
 
@@ -312,14 +330,23 @@ class ClusterLongitudualWidthMetric(PhysicsDataStatistic):
 class ClusterTransverseWidthMetric(PhysicsDataStatistic):
     NAME = 'Cluster Transverse Width'
 
-    def evaluate_statistic(self, data):
+    @staticmethod
+    def evaluate_statistic(data):
         EnergyDeposit, ParticlePoint, ParticleMomentum = split_prep_physics_data(data)
         return calogan_metrics.get_shower_width(EnergyDeposit, ParticleMomentum, ParticlePoint, orthog=True)
 
 
 class PhysicsPRDMetric(PhysicsDataStatistic):
+    NAME = 'PRD'
+
     def evaluate(self, gen_data: Any, val_data, **kwargs) -> Tuple[Any, Any]:
-        precisions, recalls = calogan_prd.calc_pr_rec(data_real=val_data[0], data_fake=gen_data[0])
+        """
+        :param gen_data:
+        :param val_data:
+        takes X as embedding
+        """
+        precisions, recalls = calogan_prd.calc_pr_rec_from_embeds(data_real_embeds=val_data[0],
+                                                                  data_fake_embeds=gen_data[0])
         return precisions, recalls
 
 
@@ -329,13 +356,44 @@ class AveragePRDAUCMetric(PhysicsDataStatistic):
     def evaluate(self, gen_data: Any,
                  val_data: Optional[Any] = None,
                  **kwargs):
-        if gen_data is None or val_data is None:
+        if gen_data[0] is None or val_data[0] is None:
             return 0.  # zero recall or zero precision respectively
-
         precisions, recalls = PhysicsPRDMetric().evaluate(gen_data=gen_data, val_data=val_data)
         pr_aucs = plot_pr_aucs(precisions=precisions, recalls=recalls)
         plt.close()
         return np.mean(pr_aucs)
+
+
+PHYS_STATISTICS = [LongitudualClusterAsymmetryMetric, TransverseClusterAsymmetryMetric,
+                   ClusterLongitudualWidthMetric, ClusterTransverseWidthMetric]
+
+
+class DataStatisticsCombiner:
+    """
+    Ожидаются функции, которые по каждому объекту возвращают число или вектор.
+    Этот класс для каждого объекта конкатенирует выходы всех функций в один вектор.
+
+    Ещё он добавляет Y к возвращаемым данным.
+    """
+    def __init__(self, *fns):
+        self.fns = fns
+
+    def __call__(self, data):
+        res = [
+            fn(data) for fn in self.fns
+        ]
+        res = [
+            x[:, None] if x.ndim == 1 else x for x in res
+        ]
+
+        for x in res:
+            assert x.ndim == 2, 'Some function gave result with dimension higher than 1'
+
+        res_x = np.hstack(res)
+        good_indices = [
+            i for i in range(len(res_x)) if not (np.isinf(res_x[i]).any() or np.isnan(res_x[i]).any())
+        ]
+        return select_indices((res_x, data[1]), good_indices)
 
 
 def select_indices(data: Union[torch.Tensor, Tuple[torch.Tensor]], indices):
@@ -371,7 +429,8 @@ def split_into_bins(data: Union[torch.Tensor, Tuple[torch.Tensor]], condition_da
     bins_mul = torch.LongTensor(bins_mul, ).reshape(dim_bins.shape)
     # ------
 
-    dims_codes = (condition_data - mins) // steps
+    dims_codes = torch.div(condition_data - mins, steps, rounding_mode='trunc')
+    # dims_codes = (condition_data - mins) // steps
     dims_codes = torch.maximum(dims_codes, torch.zeros(dims_codes.shape))
     dims_codes = torch.minimum(dims_codes, dim_bins - 1)
     dims_codes = dims_codes.long()
@@ -421,12 +480,12 @@ class ConditionBinsMetric(Metric):
             split_condition = val_y[self.condition_index]
         else:
             split_condition = val_y
-        splitted_data = split_into_bins((gen_x, val_x), condition_data=split_condition,
+        splitted_data = split_into_bins((gen_x, val_x, val_y), condition_data=split_condition,
                                         dim_bins=self.dim_bins)
 
         results = []
-        for gen_bin, val_bin in tqdm(splitted_data):
-            metric_result = self.metric.evaluate(gen_data=(gen_bin, None), val_data=(val_bin, None))
+        for gen_bin, val_bin, y_bin in tqdm(splitted_data):
+            metric_result = self.metric.evaluate(gen_data=(gen_bin, y_bin), val_data=(val_bin, y_bin))
             results.append(metric_result)
         return results
 
@@ -508,5 +567,7 @@ __all__ = ['Metric', 'CriticValuesDistributionMetric',
            'MetricsSequence',
            'AveragePRDAUCMetric',
            'unravel_metric_results',
-           'PhysicsPRDBinsMetric',
-           'ConditionBinsMetric']
+           'ConditionBinsMetric',
+           'TransformData',
+           'DataStatisticsCombiner',
+           'PHYS_STATISTICS']
