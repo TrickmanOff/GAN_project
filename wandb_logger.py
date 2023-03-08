@@ -16,9 +16,12 @@ class _WandbLogger(GANLogger):
     """
     WANDB_POINTS_LIMIT = 10_000
     PYPLOT_FORMAT = 'png'
+    SUMMARY_METRICS_TABLE_NAME = 'summary_metrics'
 
-    def __init__(self, config: Optional[LoggerConfig] = None):
+    def __init__(self, config: Optional[LoggerConfig] = None, wandb_run=None):
         super().__init__(config=config)
+        self.wandb_run = wandb_run
+        self.summary_metrics_table = None
 
     def _log_metrics(self, data: Dict[str, Any], period: str, period_index: int) -> None:
         # if period not in self._periods:
@@ -92,12 +95,40 @@ class _WandbLogger(GANLogger):
 
         file.close()
 
+    @staticmethod
+    def _table_to_dict(wandb_table) -> Dict[str, Any]:
+        return dict(zip(wandb_table.columns, wandb_table.data[0]))
+
+    def log_summary_metrics(self, data: Dict[str, Any]) -> None:
+        """
+        :param data: {metric_name: value}
+        """
+        prev_data = {}
+        if self.summary_metrics_table is not None:
+            prev_data = self._table_to_dict(self.summary_metrics_table)
+        else:
+            artifact_name = f'run-{self.wandb_run.id}-{self.SUMMARY_METRICS_TABLE_NAME}:latest'
+            try:
+                summary_metrics_table = self.wandb_run.use_artifact(artifact_name).get(self.SUMMARY_METRICS_TABLE_NAME)
+                prev_data = self._table_to_dict(summary_metrics_table)
+            except wandb.CommError:
+                pass
+
+        new_data = prev_data
+        new_data.update(data)
+
+        table = wandb.Table(columns=list(new_data.keys()), data=[list(new_data.values())])
+        wandb.log({self.SUMMARY_METRICS_TABLE_NAME: table})
+        self.summary_metrics_table = table
+
 
 class WandbCM:
     """
     Wandb logger context manager
 
     calls wandb.login(), wandb.init() and wandb.finish()
+
+    Use different 'experiment_id's for different runs. Otherwise, the old one will be resumed.
     """
     def __init__(self, project_name: str, experiment_id: str, token: str, config: Optional[LoggerConfig] = None) -> None:
         self.project_name = project_name
@@ -105,13 +136,20 @@ class WandbCM:
         self.token = token
         self.config = config
 
+    @staticmethod
+    def _generate_run_id(project_name: str) -> str:
+        MODULO = 1_0000_0000
+        return str(hash(project_name) % MODULO)
+
     def __enter__(self) -> _WandbLogger:
         wandb.login(key=self.token)
-        wandb.init(
+        run = wandb.init(
             project=self.project_name,
-            name=self.experiment_id
+            id=self._generate_run_id(self.experiment_id),
+            name=self.experiment_id,
+            resume='allow',
         )
-        return _WandbLogger()
+        return _WandbLogger(wandb_run=run)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         wandb.finish()

@@ -131,7 +131,23 @@ class WganEpochTrainer(GanEpochTrainer):
                 logger.log_metrics(data={'train/generator/loss': gen_loss.item()},
                                    period='batch', period_index=batch_index+1, commit=False)
 
+        generator_stepper.epoch_finished()
+        critic_stepper.epoch_finished()
+
         if logger is not None:
+            if generator_stepper.scheduler is not None:
+                generator_lr = generator_stepper.scheduler.get_last_lr()
+                logger.log_metrics(
+                    data={'generator/lr': generator_lr},
+                    period='epoch',
+                    commit=False)
+            if critic_stepper.scheduler is not None:
+                critic_lr = critic_stepper.scheduler.get_last_lr()
+                logger.log_metrics(
+                    data={'critic/lr': critic_lr},
+                    period='epoch',
+                    commit=False)
+
             logger.log_metrics(data={'train/critic/loss': critic_loss_total / len(train_dataset)},
                                period='epoch',
                                commit=False)

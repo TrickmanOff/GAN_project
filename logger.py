@@ -1,7 +1,8 @@
 from abc import abstractmethod
+from collections import defaultdict
 from copy import copy
 from dataclasses import dataclass
-from typing import Dict, Any, Iterable, Set, Optional, Tuple
+from typing import Dict, Any, Iterable, Set, Optional, Tuple, Union
 
 """
 Currently there's no convenient support for several loggers at one time.
@@ -13,6 +14,7 @@ It is expected to be provided if the existing logging interface shows its conven
 class LoggerConfig:
     ignored_periods: Optional[Set[str]] = None
     ignored_metrics: Optional[Set[str]] = None
+    # TODO: добавить возможность отключить логирование training_stats
 
 
 def get_default_config() -> LoggerConfig:
@@ -26,6 +28,49 @@ class GANLogger:
     def __init__(self, config: Optional[LoggerConfig] = None) -> None:
         self.config = get_default_config() if config is None else config
         self.accumulated_data: Dict[str, Tuple[int, Dict[str, Any]]] = {}   # (period: data with {period: period_index})
+        self.training_metrics = defaultdict(dict)  # {period_name: {metric_name: {'min': (min_value, period_index), 'max': (max_value, period_index), 'last': value}}}
+
+    def _update_training_info(self, data: Dict[str, Any], period: str, period_index: int) -> None:
+        cur_period_minmax = self.training_metrics[period]
+        for metric_name, value in data.items():
+            if not isinstance(value, float) and not isinstance(value, int):
+                continue
+            if metric_name not in cur_period_minmax:
+                cur_period_minmax[metric_name] = {'min': (value, period_index), 'max': (value, period_index)}
+            else:
+                if value < cur_period_minmax[metric_name]['min'][0]:
+                    cur_period_minmax[metric_name]['min'] = (value, period_index)
+                if value > cur_period_minmax[metric_name]['max'][0]:
+                    cur_period_minmax[metric_name]['max'] = (value, period_index)
+            cur_period_minmax[metric_name]['last'] = value
+
+    def get_training_metrics(self) -> Dict[str, Dict[str, Union[float, int]]]:
+        """
+        {period_name: {metric_name: {'min': (min_value, period_index), 'max': (max_value, period_index)}}}
+        """
+        return dict(self.training_metrics)
+
+    def log_summary_metrics(self, data: Dict[str, Any]) -> None:
+        pass
+
+    def log_running_training_metrics(self, period: str) -> None:
+        training_metrics = self.training_metrics[period]
+        logged_data = {}
+        for metric_name, stats in training_metrics.items():
+            for stat_name, value in stats.items():
+                full_metric_name = stat_name + ' ' + metric_name
+                if stat_name != 'last':
+                    value, epoch = value
+
+                if isinstance(value, float):
+                    value = round(value, 4)
+                if stat_name != 'last':
+                    saved_value = f'{value} ({epoch})'
+                else:
+                    saved_value = value
+                logged_data[full_metric_name] = saved_value
+
+        self.log_summary_metrics(logged_data)
 
     def log_metrics(self, data: Dict[str, Any], period: str, period_index: Optional[int] = None, commit: bool = True) -> None:
         """
@@ -55,9 +100,13 @@ class GANLogger:
             data.update(prev_data)
 
         assert period_index is not None, 'Period index is not specified'
+
+        self._update_training_info(data, period=period, period_index=period_index)
+
         self.accumulated_data[period] = (period_index, data)
 
         if commit:
+            self.log_running_training_metrics(period=period)
             self._log_metrics(data, period, period_index)
             self.accumulated_data.pop(period)
 
