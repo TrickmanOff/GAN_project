@@ -63,7 +63,8 @@ class GanEpochTrainer(ABC):
     def train_epoch(self, gan_model: GAN,
                     train_dataset: torch.utils.data.Dataset, val_dataset: torch.utils.data.Dataset,
                     generator_stepper: Stepper, critic_stepper: Stepper,
-                    logger: Optional[GANLogger] = None) -> None:
+                    logger: Optional[GANLogger] = None,
+                    normalization_loss: Optional[Callable] = None) -> None:
         pass
 
 
@@ -75,7 +76,8 @@ class WganEpochTrainer(GanEpochTrainer):
     def train_epoch(self, gan_model: GAN,
                     train_dataset: torch.utils.data.Dataset, val_dataset: torch.utils.data.Dataset,
                     generator_stepper: Stepper, critic_stepper: Stepper,
-                    logger: Optional[GANLogger] = None) -> None:
+                    logger: Optional[GANLogger] = None,
+                    normalization_loss: Optional[Callable] = None) -> None:
         dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=self.batch_size, collate_fn=collate_fn, shuffle=True)
         random_dataloader = get_random_infinite_dataloader(train_dataset, batch_size=self.batch_size, collate_fn=collate_fn)
         random_dataloader_iter = iter(random_dataloader)
@@ -100,15 +102,19 @@ class WganEpochTrainer(GanEpochTrainer):
             for t in range(self.n_critic):
                 real_batch = next(random_dataloader_iter)
                 gen_batch_x, real_batch_x, gen_batch_y, real_batch_y = get_batches(real_batch)
-                loss = - (gan_model.discriminator(real_batch_x, real_batch_y) -
-                          gan_model.discriminator(gen_batch_x, gen_batch_y)).mean()
+                disc_real_vals = gan_model.discriminator(real_batch_x, real_batch_y)
+                disc_gen_vals = gan_model.discriminator(gen_batch_x, gen_batch_y)
+                loss = - (disc_real_vals - disc_gen_vals).mean()
+                if normalization_loss is not None:
+                    loss += normalization_loss()
                 if logger is not None:
                     logger.log_metrics(data={'train/discriminator/loss': -loss.item()},
                                        period='batch', period_index=t+1, commit=True)
                 loss.backward()
                 critic_stepper.step()
                 critic_stepper.optimizer.zero_grad()
-                update_normalizers_stats(gan_model.discriminator)
+                update_normalizers_stats(gan_model.discriminator, disc_real_vals=disc_real_vals,
+                                         disc_gen_vals=disc_gen_vals)
 
             critic_loss_total += loss.item() * len(gen_batch_x)
 
@@ -121,6 +127,8 @@ class WganEpochTrainer(GanEpochTrainer):
             observations = (gan_model.discriminator(real_batch_x, real_batch_y) -
                             gan_model.discriminator(gen_batch_x, gen_batch_y))
             gen_loss = observations.mean()
+            if normalization_loss is not None:
+                gen_loss += normalization_loss()
             gen_loss_total += gen_loss * len(gen_batch_x)
             gen_loss.backward()
             generator_stepper.step()
@@ -180,6 +188,7 @@ class GanTrainer:
               metric: Optional[Metric] = None,
               metric_predicate: Optional[TrainPredicate] = None,
               logger_cm_fn: Optional[Callable[[], ContextManager[GANLogger]]] = None,
+              normalization_loss: Optional[Callable] = None,
               result_metrics: Optional[Tuple[List, MetricsSequence]] = None,
               results_info: Optional[ExperimentInfo] = None) -> Generator[Tuple[int, GAN], None, GAN]:
         """
@@ -202,7 +211,11 @@ class GanTrainer:
                 generator_stepper.load_state_dict(checkpoint['generator_stepper'])
                 critic_stepper.load_state_dict(checkpoint['critic_stepper'])
 
-        logger_cm = logger_cm_fn() or contextlib.nullcontext(None)
+        if logger_cm_fn is None:
+            logger_cm = contextlib.nullcontext(None)
+        else:
+            logger_cm = logger_cm_fn() or contextlib.nullcontext(None)
+
         with logger_cm as logger:
             while epoch <= n_epochs:
                 if logger is not None:
@@ -210,7 +223,7 @@ class GanTrainer:
 
                 epoch_trainer.train_epoch(gan_model=gan_model, train_dataset=train_dataset, val_dataset=val_dataset,
                                           generator_stepper=generator_stepper, critic_stepper=critic_stepper,
-                                          logger=logger)
+                                          logger=logger, normalization_loss=normalization_loss)
 
                 if logger is not None:
                     if metric is not None and (metric_predicate is None or metric_predicate(epoch=epoch)):

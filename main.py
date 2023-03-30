@@ -15,7 +15,8 @@ from gan import GAN
 from generators import SimplePhysicsGenerator, CaloganPhysicsGenerator
 from metrics import *
 from custom_metrics import *
-from normalization import apply_normalization, SpectralNormalizer
+from normalization import apply_normalization, SpectralNormalizer, WeakSpectralNormalizer,\
+                          MultiplyOutputNormalizer, ABCASNormalizer
 from predicates import TrainPredicate, IgnoreFirstNEpochsPredicate, EachNthEpochPredicate
 from results_storage import ResultsStorage
 from storage import ExperimentsStorage
@@ -64,6 +65,7 @@ def get_wandb_token() -> str:
 
 
 def init_logger(model_name: str = '', project_name='GANs'):
+    return None
     config = logger.get_default_config()
     @contextlib.contextmanager
     def logger_cm():
@@ -76,31 +78,34 @@ def init_logger(model_name: str = '', project_name='GANs'):
 
 
 def form_metric() -> Metric:
+    return None
     return MetricsSequence(
-        CriticValuesDistributionMetric(values_cnt=1000),
-        PhysicsDataStatistics(
-            *[statistic_cls() for statistic_cls in PHYS_STATISTICS],
-            create_prd_energy_embed(),
-            create_conditional_prd_energy_embed(),
-            create_prd_physics_statistics(),
-            create_conditional_prd_physics_statistics(),
-        ),
+        BetaMetric(),
+        DiscriminatorParameterMetric('r'),
+        # CriticValuesDistributionMetric(values_cnt=1000),
+        # PhysicsDataStatistics(
+        #     *[statistic_cls() for statistic_cls in PHYS_STATISTICS],
+        #     create_prd_energy_embed(),
+        #     create_conditional_prd_energy_embed(),
+        #     create_prd_physics_statistics(),
+        #     create_conditional_prd_physics_statistics(),
+        # ),
     )
 
 
-def form_metric_predicate() -> TrainPredicate:
-    return IgnoreFirstNEpochsPredicate(20) & EachNthEpochPredicate(5)
+def form_metric_predicate() -> Optional[TrainPredicate]:
+    # return IgnoreFirstNEpochsPredicate(20) & EachNthEpochPredicate(5)
+    return None
 
 
 def form_result_metrics() -> Metric:
     return MetricsSequence(
-                # DataStatistics(
-                    # KLDivergence(LongitudualClusterAsymmetryMetric()),
-                    # KLDivergence(TransverseClusterAsymmetryMetric()),
-                    # KLDivergence(ClusterLongitudualWidthMetric()),
-                    # KLDivergence(ClusterTransverseWidthMetric()),
-                    # AveragePRDAUCMetric(),
-                # ),
+                DataStatistics(
+                    KLDivergence(LongitudualClusterAsymmetryMetric()),
+                    KLDivergence(TransverseClusterAsymmetryMetric()),
+                    KLDivergence(ClusterLongitudualWidthMetric()),
+                    KLDivergence(ClusterTransverseWidthMetric()),
+                ),
             )
 
 
@@ -132,6 +137,13 @@ def form_gan_trainer(model_name: str, gan_model: Optional[GAN] = None, n_epochs:
     generator = CaloganPhysicsGenerator(noise_dim=noise_dimension)
     discriminator = CaloganPhysicsDiscriminator()
     discriminator = apply_normalization(discriminator, SpectralNormalizer)
+    # discriminator = apply_normalization(discriminator, MultiplyOutputNormalizer, coef=2., is_trainable_coef=False)
+    # discriminator = apply_normalization(discriminator, WeakSpectralNormalizer, beta=2., is_trainable_beta=False)
+    # discriminator = apply_normalization(discriminator, ABCASNormalizer)
+
+    normalization_loss = None
+    # lambd = 1.
+    # normalization_loss = lambda: lambd*discriminator.coef**2
 
     if gan_model is None:
         gan_model = GAN(generator, discriminator, uniform_noise_generator)
@@ -144,7 +156,7 @@ def form_gan_trainer(model_name: str, gan_model: Optional[GAN] = None, n_epochs:
         optimizer=torch.optim.RMSprop(discriminator.parameters(), lr=1e-4)
     )
 
-    epoch_trainer = WganEpochTrainer(n_critic=5, batch_size=100)
+    epoch_trainer = WganEpochTrainer(n_critic=5, batch_size=200)
 
     model_dir = experiments_storage.get_model_dir(model_name)
     trainer = GanTrainer(model_dir=model_dir, use_saved_checkpoint=True, save_checkpoint_once_in_epoch=500)
@@ -155,27 +167,29 @@ def form_gan_trainer(model_name: str, gan_model: Optional[GAN] = None, n_epochs:
                                         epoch_trainer=epoch_trainer,
                                         n_epochs=n_epochs,
                                         metric=metric, metric_predicate=metric_predicate,
-                                        logger_cm_fn=logger_cm_fn)
+                                        logger_cm_fn=logger_cm_fn,
+                                        normalization_loss=normalization_loss)
     return train_gan_generator
 
 
 def call_generator(generator):
-    """Like 'yield from' but doesn't make the current function a generator"""
+    """Returns the last generated value"""
+    last_val = None
     while True:
         try:
-            generator.send(None)
-        except StopIteration as exc:
-            return exc.value
+            last_val = generator.send(None)
+        except StopIteration:
+            return last_val
 
 
 def main():
     model_name = 'physics_test'
     gan_trainer = form_gan_trainer(model_name=model_name, n_epochs=100)
-    gan_model = call_generator(gan_trainer)
+    epoch, gan_model = call_generator(gan_trainer)
     # evaluate the trained model
     result_metrics = form_result_metrics()
     val_dataset = form_dataset(train=False)
-    evaluate_model(model_name, gan_model, val_dataset, result_metrics, storage=results_storage)
+    # evaluate_model(model_name, gan_model, val_dataset, result_metrics, storage=results_storage)
     # do sth with gan model
 
 

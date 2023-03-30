@@ -11,6 +11,7 @@ from tqdm import tqdm
 from data import collate_fn, move_batch_to, stack_batches
 from device import get_local_device
 from gan import GAN
+from normalization import WeakSpectralNormalizer
 from physical_metrics import calogan_metrics, calogan_prd
 from physical_metrics.calogan_prd import plot_pr_aucs, get_energy_embedding
 
@@ -65,6 +66,58 @@ class ModelMetric(Metric):
         return {
             'gan_model': kwargs['gan_model']
         }
+
+
+class GeneratorAttributeMetric(ModelMetric):
+    def __init__(self, attr_name: str):
+        self.attr_name = attr_name
+        self.NAME = f'generator.{attr_name}'
+
+    def evaluate(self, gan_model, *args, **kwargs) -> float:
+        generator = gan_model.generator
+        return getattr(generator, self.attr_name)
+
+
+class DiscriminatorAttributeMetric(ModelMetric):
+    def __init__(self, attr_name: str):
+        self.attr_name = attr_name
+        self.NAME = f'critic.{attr_name}'
+
+    def evaluate(self, gan_model, *args, **kwargs) -> float:
+        discriminator = gan_model.discriminator
+        return getattr(discriminator, self.attr_name)
+
+
+class GeneratorParameterMetric(ModelMetric):
+    def __init__(self, attr_name: str):
+        self.attr_name = attr_name
+        self.NAME = f'generator.{attr_name}'
+
+    def evaluate(self, gan_model, *args, **kwargs) -> float:
+        generator = gan_model.generator
+        return getattr(generator, self.attr_name).data.item()
+
+
+class DiscriminatorParameterMetric(ModelMetric):
+    def __init__(self, attr_name: str):
+        self.attr_name = attr_name
+        self.NAME = f'critic.{attr_name}'
+
+    def evaluate(self, gan_model, *args, **kwargs) -> float:
+        discriminator = gan_model.discriminator
+        return getattr(discriminator, self.attr_name).data.item()
+
+
+class BetaMetric(ModelMetric):
+    NAME = 'beta'
+
+    def evaluate(self, gan_model, *args, **kwargs) -> float:
+        discriminator = gan_model.discriminator
+        # пока только для одного beta
+        if isinstance(discriminator, WeakSpectralNormalizer):
+            return discriminator.beta.data.item()
+        else:
+            return 1.
 
 
 def generate_data(gan_model: GAN, dataloader: torch.utils.data.DataLoader,
@@ -570,4 +623,6 @@ __all__ = ['Metric', 'CriticValuesDistributionMetric',
            'ConditionBinsMetric',
            'TransformData',
            'DataStatisticsCombiner',
-           'PHYS_STATISTICS']
+           'PHYS_STATISTICS',
+           'BetaMetric', 'DiscriminatorParameterMetric', 'GeneratorParameterMetric',
+           'GeneratorAttributeMetric', 'DiscriminatorAttributeMetric']

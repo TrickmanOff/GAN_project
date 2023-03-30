@@ -95,5 +95,10 @@ def log_metric(metric: Metric, results: Any, logger: GANLogger, period: str, per
                                     period_index=period_index)
         else:
             raise NotImplementedError  # currently, all DataStatistic-s return samples from a distribution
+    elif isinstance(metric, BetaMetric):
+        logger.log_metrics(data={metric.NAME: results}, period=period, period_index=period_index, commit=False)
+    elif isinstance(metric, DiscriminatorParameterMetric) or isinstance(metric, GeneratorParameterMetric) or \
+         isinstance(metric, DiscriminatorAttributeMetric) or isinstance(metric, GeneratorAttributeMetric):
+        logger.log_metrics(data={metric.NAME: results}, period=period, period_index=period_index, commit=False)
     else:
         raise NotImplementedError(f'Metric "{type(metric)}" is not supported for logging')
