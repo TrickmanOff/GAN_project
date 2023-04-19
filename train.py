@@ -15,6 +15,7 @@ from metrics import Metric, MetricsSequence
 from metrics_logging import log_metric
 from normalization import update_normalizers_stats
 from predicates import TrainPredicate
+from regularizer import Regularizer
 from results_storage import ExperimentInfo, Result
 from storage import ModelDir
 
@@ -64,7 +65,7 @@ class GanEpochTrainer(ABC):
                     train_dataset: torch.utils.data.Dataset, val_dataset: torch.utils.data.Dataset,
                     generator_stepper: Stepper, critic_stepper: Stepper,
                     logger: Optional[GANLogger] = None,
-                    normalization_loss: Optional[Callable] = None) -> None:
+                    regularizer: Optional[Regularizer] = None) -> None:
         pass
 
 
@@ -77,7 +78,7 @@ class WganEpochTrainer(GanEpochTrainer):
                     train_dataset: torch.utils.data.Dataset, val_dataset: torch.utils.data.Dataset,
                     generator_stepper: Stepper, critic_stepper: Stepper,
                     logger: Optional[GANLogger] = None,
-                    normalization_loss: Optional[Callable] = None) -> None:
+                    regularizer: Optional[Regularizer] = None) -> None:
         dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=self.batch_size, collate_fn=collate_fn, shuffle=True)
         random_dataloader = get_random_infinite_dataloader(train_dataset, batch_size=self.batch_size, collate_fn=collate_fn)
         random_dataloader_iter = iter(random_dataloader)
@@ -105,8 +106,8 @@ class WganEpochTrainer(GanEpochTrainer):
                 disc_real_vals = gan_model.discriminator(real_batch_x, real_batch_y)
                 disc_gen_vals = gan_model.discriminator(gen_batch_x, gen_batch_y)
                 loss = - (disc_real_vals - disc_gen_vals).mean()
-                if normalization_loss is not None:
-                    loss += normalization_loss()
+                if regularizer is not None:
+                    loss += regularizer()
                 if logger is not None:
                     logger.log_metrics(data={'train/discriminator/loss': -loss.item()},
                                        period='batch', period_index=t+1, commit=True)
@@ -127,8 +128,9 @@ class WganEpochTrainer(GanEpochTrainer):
             observations = (gan_model.discriminator(real_batch_x, real_batch_y) -
                             gan_model.discriminator(gen_batch_x, gen_batch_y))
             gen_loss = observations.mean()
-            if normalization_loss is not None:
-                gen_loss += normalization_loss()
+            if regularizer is not None:
+                loss += regularizer()
+                regularizer.step()
             gen_loss_total += gen_loss * len(gen_batch_x)
             gen_loss.backward()
             generator_stepper.step()
@@ -188,6 +190,7 @@ class GanTrainer:
               metric: Optional[Metric] = None,
               metric_predicate: Optional[TrainPredicate] = None,
               logger_cm_fn: Optional[Callable[[], ContextManager[GANLogger]]] = None,
+              regularizer: Optional[Regularizer] = None,
               normalization_loss: Optional[Callable] = None,
               result_metrics: Optional[Tuple[List, MetricsSequence]] = None,
               results_info: Optional[ExperimentInfo] = None) -> Generator[Tuple[int, GAN], None, GAN]:
@@ -223,7 +226,7 @@ class GanTrainer:
 
                 epoch_trainer.train_epoch(gan_model=gan_model, train_dataset=train_dataset, val_dataset=val_dataset,
                                           generator_stepper=generator_stepper, critic_stepper=critic_stepper,
-                                          logger=logger, normalization_loss=normalization_loss)
+                                          logger=logger, regularizer=regularizer)
 
                 if logger is not None:
                     if metric is not None and (metric_predicate is None or metric_predicate(epoch=epoch)):

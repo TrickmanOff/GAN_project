@@ -165,18 +165,17 @@ class WeakSpectralNormalizer(Normalizer):
 
 # https://arxiv.org/pdf/2211.06595v1.pdf
 class ABCASNormalizer(Normalizer):
-    M_CONST = 0.9
-
-    def __init__(self, module: T, b: float = 4., alpha: float = 0.9999) -> None:
+    def __init__(self, module: T, b: float = 4., alpha: float = 0.9999, m_const: float = 0.9) -> None:
         super().__init__(module=module)
         self.b = b  # beta in the paper
         self.r = 0.
         self.register_buffer('dm', torch.tensor(0.))
         self.alpha = alpha
         self.module = apply_normalization(module, SpectralNormalizer)
+        self.m_const = m_const
 
     def forward(self, X: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        m = self.M_CONST ** self.r
+        m = self.m_const ** self.r
         return self.module(X, *args, **kwargs) * m
 
     def update_stats(self, disc_real_vals: torch.Tensor, disc_gen_vals: torch.Tensor, **kwargs) -> None:
@@ -191,7 +190,10 @@ class MultiplyOutputNormalizer(Normalizer):
     def __init__(self, module: T, coef: float = 1., is_trainable_coef: bool = False):
         super().__init__(module)
         self.is_trainable_coef = is_trainable_coef
-        self.register_buffer('coef', torch.tensor(coef))
+        if is_trainable_coef:
+            self.coef = nn.Parameter(torch.tensor(coef), requires_grad=True)
+        else:
+            self.register_buffer('coef', torch.tensor(coef))
 
     def forward(self, X: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         return self.coef * self.module(X, *args, **kwargs)

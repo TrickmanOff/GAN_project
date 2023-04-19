@@ -18,6 +18,7 @@ from custom_metrics import *
 from normalization import apply_normalization, SpectralNormalizer, WeakSpectralNormalizer,\
                           MultiplyOutputNormalizer, ABCASNormalizer
 from predicates import TrainPredicate, IgnoreFirstNEpochsPredicate, EachNthEpochPredicate
+from regularizer import *
 from results_storage import ResultsStorage
 from storage import ExperimentsStorage
 from train import Stepper, WganEpochTrainer, GanTrainer
@@ -141,7 +142,10 @@ def form_gan_trainer(model_name: str, gan_model: Optional[GAN] = None, n_epochs:
     # discriminator = apply_normalization(discriminator, WeakSpectralNormalizer, beta=2., is_trainable_beta=False)
     # discriminator = apply_normalization(discriminator, ABCASNormalizer)
 
-    normalization_loss = None
+    regularizer = BasicRegularizer(lambda: discriminator.coef)
+    regularizer = PowRegularizer(regularizer, 2)
+    regularizer = MultiplierRegularizer(regularizer, start_value=1.)
+
     # lambd = 1.
     # normalization_loss = lambda: lambd*discriminator.coef**2
 
@@ -168,7 +172,7 @@ def form_gan_trainer(model_name: str, gan_model: Optional[GAN] = None, n_epochs:
                                         n_epochs=n_epochs,
                                         metric=metric, metric_predicate=metric_predicate,
                                         logger_cm_fn=logger_cm_fn,
-                                        normalization_loss=normalization_loss)
+                                        regularizer=regularizer)
     return train_gan_generator
 
 
