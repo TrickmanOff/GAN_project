@@ -165,11 +165,12 @@ class WeakSpectralNormalizer(Normalizer):
 
 # https://arxiv.org/pdf/2211.06595v1.pdf
 class ABCASNormalizer(Normalizer):
-    def __init__(self, module: T, b: float = 4., alpha: float = 0.9999, m_const: float = 0.9) -> None:
+    def __init__(self, module: T, b: float = 4., alpha: float = 0.9999, m_const: float = 0.9,
+                 r_start: float = 0.) -> None:
         super().__init__(module=module)
-        self.b = b  # beta in the paper
-        self.r = 0.
-        self.register_buffer('dm', torch.tensor(0.))
+        self.b = b   # beta in the paper
+        self.r = r_start  # this value is not used
+        self.register_buffer('dm', torch.tensor(r_start))
         self.alpha = alpha
         self.module = apply_normalization(module, SpectralNormalizer)
         self.m_const = m_const

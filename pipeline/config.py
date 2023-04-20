@@ -62,10 +62,18 @@ class PathsConfig:
 
 
 @dataclass
+class LoggerConfig:
+    project_name: str
+    enable_logging: bool = True
+
+
+@dataclass
 class GlobalConfig:
     paths: PathsConfig
+    logger: LoggerConfig
 
 
 def load_global_config() -> GlobalConfig:
     paths_config = load_config(PathsConfig, 'paths.yaml')
-    return GlobalConfig(paths=paths_config)
+    logger_config = load_config(LoggerConfig, 'logger.yaml')
+    return GlobalConfig(paths=paths_config, logger=logger_config)
