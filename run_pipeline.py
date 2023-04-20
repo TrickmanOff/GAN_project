@@ -2,7 +2,11 @@ import sys
 
 
 def main():
+    model_name = 'test_model'
     sys.path.insert(0, '/kaggle/input/gan-training')  # for the 'pipeline' to be found
+    from pipeline.experiment_setup import experiments_storage
+    experiments_storage.load_config(model_name)
+
     from config import run_experiment
     run_experiment.run()
 
