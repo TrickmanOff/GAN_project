@@ -152,9 +152,9 @@ class WandbCM:
         wandb.login(key=self.token)
         run = wandb.init(
             project=self.project_name,
-            id=self._generate_run_id(self.experiment_id),
+            # id=self._generate_run_id(self.experiment_id),
             name=self.experiment_id,
-            resume='allow',
+            # resume='allow',
         )
         return _WandbLogger(wandb_run=run)
 
