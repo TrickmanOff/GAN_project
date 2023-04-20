@@ -1,7 +1,7 @@
 import torch
 
-from metrics import *
-from physical_metrics.calogan_prd import get_energy_embedding
+from pipeline.metrics import *
+from pipeline.physical_metrics.calogan_prd import get_energy_embedding
 
 
 def create_prd_energy_embed():

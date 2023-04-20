@@ -7,7 +7,8 @@ import wandb
 from matplotlib import pyplot as plt
 from scipy.stats import gaussian_kde
 
-from logger import GANLogger, LoggerConfig
+from pipeline.logger import GANLogger, LoggerConfig
+from pipeline.run_env import get_wandb_token
 
 
 class _WandbLogger(GANLogger):
@@ -130,9 +131,15 @@ class WandbCM:
 
     Use different 'experiment_id's for different runs. Otherwise, the old one will be resumed.
     """
-    def __init__(self, project_name: str, experiment_id: str, token: str, config: Optional[LoggerConfig] = None) -> None:
+    def __init__(self, project_name: str, experiment_id: str, token: Optional[str] = None,
+                 config: Optional[LoggerConfig] = None) -> None:
+        """
+        :param token: if None, it will be retrieved automatically
+        """
         self.project_name = project_name
         self.experiment_id = experiment_id
+        if token is None:
+            token = get_wandb_token()
         self.token = token
         self.config = config
 

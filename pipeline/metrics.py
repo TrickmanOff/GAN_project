@@ -8,12 +8,12 @@ import torch.utils.data
 from matplotlib import pyplot as plt
 from tqdm import tqdm
 
-from data import collate_fn, move_batch_to, stack_batches
-from device import get_local_device
-from gan import GAN
-from normalization import WeakSpectralNormalizer
-from physical_metrics import calogan_metrics, calogan_prd
-from physical_metrics.calogan_prd import plot_pr_aucs, get_energy_embedding
+from pipeline.data import collate_fn, move_batch_to, stack_batches
+from pipeline.device import get_local_device
+from pipeline.gan import GAN
+from pipeline.normalization import WeakSpectralNormalizer
+from pipeline.physical_metrics import calogan_metrics, calogan_prd
+from pipeline.physical_metrics.calogan_prd import plot_pr_aucs, get_energy_embedding
 
 
 """

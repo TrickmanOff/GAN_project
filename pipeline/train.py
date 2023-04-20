@@ -7,17 +7,17 @@ import torch.utils.data
 from torch import optim
 from tqdm import tqdm
 
-from data import collate_fn, move_batch_to, get_random_infinite_dataloader
-from device import get_local_device
-from gan import GAN
-from logger import GANLogger
-from metrics import Metric, MetricsSequence
-from metrics_logging import log_metric
-from normalization import update_normalizers_stats
-from predicates import TrainPredicate
-from regularizer import Regularizer
-from results_storage import ExperimentInfo, Result
-from storage import ModelDir
+from pipeline.data import collate_fn, move_batch_to, get_random_infinite_dataloader
+from pipeline.device import get_local_device
+from pipeline.gan import GAN
+from pipeline.logger import GANLogger
+from pipeline.metrics import Metric, MetricsSequence
+from pipeline.metrics_logging import log_metric
+from pipeline.normalization import update_normalizers_stats
+from pipeline.predicates import TrainPredicate
+from pipeline.regularizer import Regularizer
+from pipeline.results_storage import ExperimentInfo, Result
+from pipeline.storage import ModelDir
 
 
 class Stepper:

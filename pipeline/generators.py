@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-import aux
+from pipeline import aux
 
 
 class Generator(nn.Module):

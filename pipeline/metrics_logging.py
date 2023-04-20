@@ -4,9 +4,9 @@ from typing import Any, Union, Tuple, Optional, Dict, Type
 
 import numpy as np
 
-from logger import GANLogger
-from metrics import *
-from physical_metrics.calogan_prd import plot_pr_aucs
+from pipeline.logger import GANLogger
+from pipeline.metrics import *
+from pipeline.physical_metrics.calogan_prd import plot_pr_aucs
 
 """
 Agreements:

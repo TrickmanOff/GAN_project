@@ -1,81 +1,31 @@
-import contextlib
-import os
-from enum import Enum, auto
+"""
+This file is expecting the 'pipeline' package name to be defined
+This file completely defines the experiment to run
+"""
 from typing import Tuple, Generator, Optional, Dict, List
 
 import numpy as np
 import torch
 import torch.utils.data
 
-import data
-import logger
-from discriminators import SimplePhysicsDiscriminator, CaloganPhysicsDiscriminator
-from evaluation import evaluate_model
-from gan import GAN
-from generators import SimplePhysicsGenerator, CaloganPhysicsGenerator
-from metrics import *
-from custom_metrics import *
-from normalization import apply_normalization, SpectralNormalizer, WeakSpectralNormalizer,\
+from pipeline import data
+from pipeline import logger
+from pipeline.discriminators import SimplePhysicsDiscriminator, CaloganPhysicsDiscriminator
+from pipeline.evaluation import evaluate_model
+from pipeline.experiment_setup import experiments_storage, global_config, init_logger
+from pipeline.gan import GAN
+from pipeline.generators import SimplePhysicsGenerator, CaloganPhysicsGenerator
+from pipeline.metrics import *
+from pipeline.config import load_global_config
+from pipeline.custom_metrics import *
+from pipeline.normalization import apply_normalization, SpectralNormalizer, WeakSpectralNormalizer,\
                           MultiplyOutputNormalizer, ABCASNormalizer
-from predicates import TrainPredicate, IgnoreFirstNEpochsPredicate, EachNthEpochPredicate
-from regularizer import *
-from results_storage import ResultsStorage
-from storage import ExperimentsStorage
-from train import Stepper, WganEpochTrainer, GanTrainer
-from wandb_logger import WandbCM
-
-
-def init_storage() -> ExperimentsStorage:
-    # === config variables ===
-    experiments_dir = './experiments'
-    checkpoint_filename = './training_checkpoint'
-    model_state_filename = './model_state'
-    # ========================
-    return ExperimentsStorage(experiments_dir=experiments_dir, checkpoint_filename=checkpoint_filename,
-                              model_state_filename=model_state_filename)
-
-
-experiments_storage = init_storage()
-
-
-def init_results_storage() -> ResultsStorage:
-    # === config variables ===
-    results_dir = './results'
-    results_filename = './results.json'
-    # ========================
-    return ResultsStorage(storage_dir=results_dir, results_filename=results_filename)
-
-
-results_storage = init_results_storage()
-
-
-class Environment(Enum):
-    LOCAL = auto()
-    KAGGLE = auto()
-
-
-ENV = Environment.LOCAL
-
-
-def get_wandb_token() -> str:
-    if ENV is Environment.LOCAL:
-        return os.getenv('WANDB_TOKEN')
-    elif ENV is Environment.KAGGLE:
-        from kaggle_secrets import UserSecretsClient
-        return UserSecretsClient().get_secret('WANDB_TOKEN')
-
-
-def init_logger(model_name: str = '', project_name='GANs'):
-    return None
-    config = logger.get_default_config()
-    @contextlib.contextmanager
-    def logger_cm():
-        try:
-            with WandbCM(project_name=project_name, experiment_id=model_name, token=get_wandb_token(), config=config) as wandb_logger:
-                yield wandb_logger
-        finally:
-            pass
-    return logger_cm
+from pipeline.predicates import TrainPredicate, IgnoreFirstNEpochsPredicate, EachNthEpochPredicate
+from pipeline.regularizer import *
+from pipeline.results_storage import ResultsStorage
+from pipeline.storage import ExperimentsStorage
+from pipeline.train import Stepper, WganEpochTrainer, GanTrainer
+from pipeline.wandb_logger import WandbCM
 
 
 def form_metric() -> Metric:
@@ -111,7 +61,7 @@ def form_result_metrics() -> Metric:
 
 
 def form_dataset(train: bool = False) -> torch.utils.data.Dataset:
-    data_filepath = '../caloGAN_case11_5D_120K.npz'
+    data_filepath = global_config.paths.data_dir_path + '/caloGAN_case11_5D_120K.npz'
     return data.UnifiedDatasetWrapper(data.get_physics_dataset(data_filepath, train=train))
 
 
@@ -176,26 +126,16 @@ def form_gan_trainer(model_name: str, gan_model: Optional[GAN] = None, n_epochs:
     return train_gan_generator
 
 
-def call_generator(generator):
-    """Returns the last generated value"""
-    last_val = None
-    while True:
-        try:
-            last_val = generator.send(None)
-        except StopIteration:
-            return last_val
-
-
-def main():
+def run() -> GAN:
     model_name = 'physics_test'
-    gan_trainer = form_gan_trainer(model_name=model_name, n_epochs=100)
-    epoch, gan_model = call_generator(gan_trainer)
-    # evaluate the trained model
-    result_metrics = form_result_metrics()
-    val_dataset = form_dataset(train=False)
-    # evaluate_model(model_name, gan_model, val_dataset, result_metrics, storage=results_storage)
-    # do sth with gan model
+    gan_trainer = form_gan_trainer(model_name=model_name, n_epochs=150)
+    gan = None
+    for epoch, gan in gan_trainer:
+        pass
+
+    # evaluate model somehow ...
+    return gan
 
 
 if __name__ == '__main__':
-    main()
+    run()

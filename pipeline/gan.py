@@ -3,8 +3,8 @@ from typing import Callable, Dict, Any
 import torch
 from torch import nn
 
-from generators import Generator
-from discriminators import Discriminator
+from pipeline.generators import Generator
+from pipeline.discriminators import Discriminator
 
 
 class GAN(nn.Module):

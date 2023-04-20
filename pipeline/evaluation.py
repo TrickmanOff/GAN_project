@@ -2,10 +2,10 @@ from typing import Dict, Optional, Tuple
 
 import torch.utils.data
 
-from gan import GAN
-from logger import GANLogger
-from metrics import Metric, unravel_metric_results
-from results_storage import ResultsStorage
+from pipeline.gan import GAN
+from pipeline.logger import GANLogger
+from pipeline.metrics import Metric, unravel_metric_results
+from pipeline.results_storage import ResultsStorage
 
 
 def evaluate_model(gan_model: GAN, val_dataset: torch.utils.data.Dataset,

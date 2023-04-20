@@ -4,7 +4,7 @@ from typing import Optional
 
 import torch
 
-from device import get_local_device
+from pipeline.device import get_local_device
 
 
 class ModelDir:
