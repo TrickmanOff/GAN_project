@@ -77,8 +77,29 @@ def get_energy_embedding(data):
     return embedder.get_encoding(data[0].view(-1, 1, 30, 30)).detach().numpy(), data[1]
 
 
-def calc_pr_rec_from_embeds(data_real_embeds: torch.Tensor, data_fake_embeds: torch.Tensor, num_clusters=20, num_runs=10, NUM_RUNS=10,
+def check_tensor_is_finite(t: np.ndarray) -> torch.Tensor:
+    x = t.astype(np.float64)
+    # for sklearn
+    if np.isnan(x).sum() > 0:
+        print('tensor contains NaN')
+    if np.isinf(x).sum() > 0:
+        print('tensor contains inf')
+    if np.isneginf(x).sum() > 0:
+        print('tensor contains -inf')
+    mask = np.isnan(x) | np.isinf(x) | np.isneginf(x)
+
+    bad_rows = mask.sum(axis=1) != 0
+    bad_rows_cnt = bad_rows.sum()
+    if bad_rows_cnt != 0:
+        print(f'{bad_rows_cnt} bad rows in tensor')
+    return x[~bad_rows]
+
+
+def calc_pr_rec_from_embeds(data_real_embeds: np.ndarray, data_fake_embeds: np.ndarray, num_clusters=20, num_runs=10, NUM_RUNS=10,
                             show_progress_bar: bool = False) -> Tuple[List[np.ndarray], List[np.ndarray]]:
+    data_real_embeds = check_tensor_is_finite(data_real_embeds)
+    data_fake_embeds = check_tensor_is_finite(data_fake_embeds)
+
     precisions = []
     recalls = []
     for _ in tqdm(range(NUM_RUNS)) if show_progress_bar else range(NUM_RUNS):
