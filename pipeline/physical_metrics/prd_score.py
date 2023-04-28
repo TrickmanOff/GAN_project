@@ -136,6 +136,9 @@ def _cluster_into_bins(eval_data, ref_data, num_clusters):
   return eval_bins, ref_bins
 
 
+from threadpoolctl import threadpool_limits
+
+
 def compute_prd_from_embedding(eval_data, ref_data, num_clusters=20,
                                num_angles=1001, num_runs=10,
                                enforce_balance=True):
@@ -181,11 +184,12 @@ def compute_prd_from_embedding(eval_data, ref_data, num_clusters=20,
   ref_data = np.array(ref_data, dtype=np.float64)
   precisions = []
   recalls = []
-  for _ in range(num_runs):
-    eval_dist, ref_dist = _cluster_into_bins(eval_data, ref_data, num_clusters)
-    precision, recall = compute_prd(eval_dist, ref_dist, num_angles)
-    precisions.append(precision)
-    recalls.append(recall)
+  with threadpool_limits(limits=1, user_api='openmp'):
+    for _ in range(num_runs):
+      eval_dist, ref_dist = _cluster_into_bins(eval_data, ref_data, num_clusters)
+      precision, recall = compute_prd(eval_dist, ref_dist, num_angles)
+      precisions.append(precision)
+      recalls.append(recall)
   precision = np.mean(precisions, axis=0)
   recall = np.mean(recalls, axis=0)
   return precision, recall
