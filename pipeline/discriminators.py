@@ -247,3 +247,55 @@ class CaloganPhysicsDiscriminator(Discriminator):
         # print(X.shape)
 
         return self.fc3(X)
+
+
+class SmallCaloganPhysicsDiscriminator(Discriminator):
+    def __init__(self, act_func=F.leaky_relu, add_points_norms_and_angles: bool = True):
+        super().__init__()
+        self.activation = act_func
+        self.add_points_norms_and_angles = add_points_norms_and_angles
+
+        # 30x30x1 -> 32x32x1 (padding)
+        # 32x32x1
+        self.conv1 = nn.Conv2d(1, 16, 3, stride=2, padding=1)
+        # 16x16x32
+        self.conv2 = nn.Conv2d(16, 32, 3, stride=2, padding=0)
+        # 8x8x64
+        self.conv3 = nn.Conv2d(32, 64, 3, stride=2, padding=0)
+        # 4x4x128
+        self.conv4 = nn.Conv2d(64, 128, 3, stride=2, padding=0)
+        # 2x2x256
+        # self.conv5 = nn.Conv2d(128, 128, 3, stride=2, padding=0)
+        # 1x1x256
+
+        condition_dim = 7 if add_points_norms_and_angles else 5
+        self.fc1 = nn.Linear(128 + condition_dim, 64)
+        self.fc2 = nn.Linear(64, 32)
+        self.fc3 = nn.Linear(32, 1)
+
+    def forward(self, EnergyDeposit, y):
+        point, momentum = y
+        if self.add_points_norms_and_angles:
+            point = aux.add_angle_and_norm(point)
+
+        # print(EnergyDeposit.shape)
+        X = self.activation(self.conv1(EnergyDeposit))
+        # print(X.shape)
+        X = self.activation(self.conv2(X))
+        # print(X.shape)
+        X = self.activation(self.conv3(X))
+        # print(X.shape)
+        X = self.activation(self.conv4(X))
+        # print(X.shape)
+
+        X = X.reshape(-1, 128)
+        # print(X.shape)
+        X = torch.cat([X, momentum, point], dim=1)
+        # print(X.shape)
+
+        X = F.leaky_relu(self.fc1(X))
+        # print(X.shape)
+        X = F.leaky_relu(self.fc2(X))
+        # print(X.shape)
+
+        return self.fc3(X)
