@@ -1,5 +1,6 @@
+import math
 from abc import abstractmethod
-from typing import TypeVar, Type, Dict, Any, Optional
+from typing import TypeVar, Type, Optional, List, Iterable, FrozenSet, Callable
 
 import torch
 from torch import nn
@@ -198,6 +199,138 @@ class MultiplyOutputNormalizer(Normalizer):
 
     def forward(self, X: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         return self.coef * self.module(X, *args, **kwargs)
+
+
+def _get_final_submodules(module: nn.Module, res: List[nn.Module]) -> None:
+    has_submodules = False
+    for name, submodule in module.named_children():
+        has_submodules = True
+        _get_final_submodules(submodule, res)
+    if not has_submodules:
+        res.append(module)
+
+
+def get_final_submodules(module: nn.Module) -> List[nn.Module]:
+    res = []
+    _get_final_submodules(module, res)
+    return res
+
+
+# used by 'MultiplyLayersOutputNormalizer'
+class _MultiplyOutputNormalizer(Normalizer):
+    def __init__(self, module: nn.Module, coefs: torch.Tensor, index: int):
+        super().__init__(module)
+        self.module = module
+        self.coefs = coefs
+        self.index = index
+
+    def forward(self, X: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+        return self.coefs[self.index] * self.module(X, *args, **kwargs)
+
+
+def _modify_sublayers(module: nn.Module, func: Callable[[nn.Module], nn.Module], *args,
+                      ids: Optional[FrozenSet[int]] = None, **kwargs) -> nn.Module:
+    """
+    if ids is None, then 'func' is applied only to leaf-modules
+    """
+    if ids is not None and id(module) in ids:
+        return func(module, *args, **kwargs)
+    is_leaf = True
+    for name, submodule in module.named_children():
+        is_leaf = False
+        modified_submodule = _modify_sublayers(submodule, func, *args, ids=ids, **kwargs)
+        setattr(module, name, modified_submodule)
+    if is_leaf and ids is None:
+        return func(module, *args, **kwargs)
+
+    return module
+
+
+def modify_sublayers(module: nn.Module, func: Callable[[nn.Module], nn.Module], *args,
+                     layers: Optional[List[nn.Module]] = None, **kwargs) -> nn.Module:
+    """
+    replaces each layer listed in 'layers' by 'func'(layer)
+    """
+    ids = frozenset({id(layer) for layer in layers}) if layers is not None else None
+    return _modify_sublayers(module, func, *args, ids=ids, **kwargs)
+
+
+# as MultiplyOutputNormalizer but for multiple layers
+class MultiplyLayersOutputNormalizer(Normalizer):
+    def __init__(self, module: nn.Module, num_layers: Optional[int] = 1,
+                 multiplied_layer_types: Optional[List[type]] = None,
+                 layers: Optional[Iterable[nn.Module]] = None,
+                 init_coef: Optional[float] = 1., init_prod_coef: Optional[float] = None,
+                 is_trainable_coef: bool = False):
+        """
+        This normalizer supports two modes: "auto" and "manual":
+        "manual" mode is active when 'layers' is not None:
+            in this case the arguments 'num_layers' and 'multiplied_layer_types' are ignored
+            and the output of each layer present in 'layers' is multiplied
+        "auto" mode is active when 'layers' is None:
+            in this case:
+            'multiplied_layer_types' - types of layers to which multiplication may be applied
+            'num_layers' - the number of layers to which multiplication is applied
+                if 'num_layers' == 1, then the output of the entire net is multiplied
+                if 'num_layers' == -1, then the output of all supported layers is multiplied
+                NOTE: currently other values are not supported
+
+            all nested modules are considered in this mode (the submodules of the 'module' that have no submodules)
+
+        'init_coef' - a value by which the output of each chosen layer is multiplied
+        'init_prod_coef' - mutually exclusive with 'init_coef', if specified, then it is the same as
+            'init_coef' = 'init_prod_coef'^(1/n), where n is the number of chosen layers
+        'is_trainable_coef' - if True, then all coefs are trainable parameters, otherwise they are not
+        """
+        super().__init__(module)
+
+        def is_module_supported(module) -> bool:
+            if multiplied_layer_types is None:
+                return True
+            else:
+                is_supported = False
+                for tp in multiplied_layer_types:
+                    is_supported = is_supported or isinstance(module, tp)
+                return is_supported
+
+        if layers is None:  # auto mode
+            assert num_layers is not None
+            if num_layers == 1:
+                layers = [module]
+            elif num_layers == -1:
+                all_layers = get_final_submodules(module)
+                layers = [submodule for submodule in all_layers if is_module_supported(submodule)]
+            else:
+                raise NotImplementedError('Supported values for `num_values` are [-1, 1]')
+
+        if init_coef is None:
+            assert init_prod_coef is not None
+            init_coef = math.pow(init_prod_coef, 1 / len(layers))
+        else:
+            assert init_prod_coef is None
+
+        # 'init_coef' and 'layers' are defined here
+        coefs = torch.full((len(layers),), init_coef)
+        if is_trainable_coef:
+            self.coefs = nn.Parameter(coefs, requires_grad=True)
+            coefs = self.coefs
+        else:
+            self.register_buffer('coefs', coefs)
+            coefs = self.coefs
+
+        _appl_cnt = 0
+
+        def apply_multiplier_to_layer(module: nn.Module):
+            nonlocal _appl_cnt
+            module = _MultiplyOutputNormalizer(module, coefs=self.coefs, index=_appl_cnt)
+            _appl_cnt += 1
+            return module
+
+        module = modify_sublayers(module, func=apply_multiplier_to_layer, layers=layers)
+        self.module = module
+
+    def forward(self, X, *args, **kwargs):
+        return self.module(X, *args, **kwargs)
 
 
 def apply_normalization(module: nn.Module,

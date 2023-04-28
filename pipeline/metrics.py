@@ -95,7 +95,7 @@ class GeneratorParameterMetric(ModelMetric):
 
     def evaluate(self, gan_model, *args, **kwargs) -> float:
         generator = gan_model.generator
-        return getattr(generator, self.attr_name).data.item()
+        return getattr(generator, self.attr_name).data
 
 
 class DiscriminatorParameterMetric(ModelMetric):
@@ -105,7 +105,7 @@ class DiscriminatorParameterMetric(ModelMetric):
 
     def evaluate(self, gan_model, *args, **kwargs) -> float:
         discriminator = gan_model.discriminator
-        return getattr(discriminator, self.attr_name).data.item()
+        return getattr(discriminator, self.attr_name).data
 
 
 class BetaMetric(ModelMetric):

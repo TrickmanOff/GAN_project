@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Any, Union, Tuple, Optional, Dict, Type
 
 import numpy as np
+import torch
 
 from pipeline.logger import GANLogger
 from pipeline.metrics import *
@@ -99,6 +100,22 @@ def log_metric(metric: Metric, results: Any, logger: GANLogger, period: str, per
         logger.log_metrics(data={metric.NAME: results}, period=period, period_index=period_index, commit=False)
     elif isinstance(metric, DiscriminatorParameterMetric) or isinstance(metric, GeneratorParameterMetric) or \
          isinstance(metric, DiscriminatorAttributeMetric) or isinstance(metric, GeneratorAttributeMetric):
-        logger.log_metrics(data={metric.NAME: results}, period=period, period_index=period_index, commit=False)
+
+        if isinstance(results, np.ndarray) or isinstance(results, torch.Tensor):
+            results = results.tolist()
+            if isinstance(results, list) and len(results) == 1:
+                results = results[0]
+
+        try:  # if iterable
+            data = {}
+            for i, val in enumerate(results):
+                data[f'{metric.NAME}[{i}]'] = val
+        except TypeError:
+            data = {metric.NAME: results}
+
+        if metric.NAME.endswith('coefs'):
+            data[metric.NAME + ' prod'] = np.prod(results)
+
+        logger.log_metrics(data=data, period=period, period_index=period_index, commit=False)
     else:
         raise NotImplementedError(f'Metric "{type(metric)}" is not supported for logging')
