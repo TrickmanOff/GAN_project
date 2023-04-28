@@ -213,7 +213,7 @@ class CaloganPhysicsDiscriminator(Discriminator):
         # 4x4x128
         self.conv4 = nn.Conv2d(128, 256, 3, stride=2, padding=0)
         # 2x2x256
-        self.conv5 = nn.Conv2d(256, 256, 3, stride=2, padding=0)
+        # self.conv5 = nn.Conv2d(256, 256, 3, stride=2, padding=0)
         # 1x1x256
 
         condition_dim = 7 if add_points_norms_and_angles else 5
