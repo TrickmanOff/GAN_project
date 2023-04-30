@@ -7,6 +7,7 @@ import torch.utils.data
 from torch import optim
 from tqdm import tqdm
 
+from pipeline.aux import calc_grad_norm
 from pipeline.data import collate_fn, move_batch_to, get_random_infinite_dataloader
 from pipeline.device import get_local_device
 from pipeline.gan import GAN
@@ -94,7 +95,9 @@ class WganEpochTrainer(GanEpochTrainer):
 
         critic_loss_total = 0.
         gen_loss_total = 0.
-
+        regularizer_loss_total = 0.
+        disc_grad_norm_total = 0.
+        gen_grad_norm_total = 0.
         # generator_batch = next(random_dataloader_iter)  # for local testing
         # for batch_index in range(1):                    # -----------------
         for batch_index, generator_batch in enumerate(tqdm(dataloader)):
@@ -107,11 +110,18 @@ class WganEpochTrainer(GanEpochTrainer):
                 disc_gen_vals = gan_model.discriminator(gen_batch_x, gen_batch_y)
                 loss = - (disc_real_vals - disc_gen_vals).mean()
                 if regularizer is not None:
-                    loss += regularizer()
+                    regularizer_loss = regularizer()
+                    regularizer_loss_total += regularizer_loss.item()
+                    if logger is not None:
+                        logger.log_metrics(data={'train/discriminator/pure_loss': loss.item(),
+                                                 'train/discriminator/reg_loss': regularizer_loss.item()},
+                                           period='batch', period_index=t+1, commit=False)
+                    loss += regularizer_loss
                 if logger is not None:
-                    logger.log_metrics(data={'train/discriminator/loss': -loss.item()},
+                    logger.log_metrics(data={'train/discriminator/loss': loss.item()},
                                        period='batch', period_index=t+1, commit=True)
                 loss.backward()
+                disc_grad_norm_total += calc_grad_norm(gan_model.discriminator)
                 critic_stepper.step()
                 critic_stepper.optimizer.zero_grad()
                 update_normalizers_stats(gan_model.discriminator, disc_real_vals=disc_real_vals,
@@ -129,10 +139,17 @@ class WganEpochTrainer(GanEpochTrainer):
                             gan_model.discriminator(gen_batch_x, gen_batch_y))
             gen_loss = observations.mean()
             if regularizer is not None:
-                loss += regularizer()
+                regularizer_loss = regularizer()
+                regularizer_loss_total += regularizer_loss.item()
+                if logger is not None:
+                    logger.log_metrics(data={'train/generator/pure_loss': gen_loss.item(),
+                                             'train/generator/reg_loss': regularizer_loss.item()},
+                                       period='batch', period_index=batch_index+1, commit=False)
+                gen_loss += regularizer_loss
                 regularizer.step()
             gen_loss_total += gen_loss * len(gen_batch_x)
             gen_loss.backward()
+            gen_grad_norm_total += calc_grad_norm(gan_model.generator)
             generator_stepper.step()
             generator_stepper.optimizer.zero_grad()
             gan_model.discriminator.requires_grad_(True)
@@ -158,10 +175,11 @@ class WganEpochTrainer(GanEpochTrainer):
                     period='epoch',
                     commit=False)
 
-            logger.log_metrics(data={'train/critic/loss': critic_loss_total / len(train_dataset)},
-                               period='epoch',
-                               commit=False)
-            logger.log_metrics(data={'train/generator/loss': gen_loss_total / len(train_dataset)},
+            logger.log_metrics(data={'train/critic/loss': critic_loss_total / len(train_dataset),
+                                     'train/generator/loss': gen_loss_total / len(train_dataset),
+                                     'train/regularizer/loss': regularizer_loss_total / (len(dataloader) * (self.n_critic + 1)),
+                                     'train/critic/grad_norm': disc_grad_norm_total / len(dataloader) * self.n_critic,
+                                     'train/generator/grad_norm': gen_grad_norm_total / len(dataloader)},
                                period='epoch',
                                commit=False)  # period_index was specified by the caller
 
@@ -230,8 +248,9 @@ class GanTrainer:
 
                 if logger is not None:
                     if metric is not None and (metric_predicate is None or metric_predicate(epoch=epoch)):
-                        metrics_results = metric(gan_model=gan_model, train_dataset=train_dataset, val_dataset=val_dataset,
-                                                 inverse_to_initial_domain_fn=inverse_to_initial_domain_fn)
+                        with torch.no_grad():
+                            metrics_results = metric(gan_model=gan_model, train_dataset=train_dataset, val_dataset=val_dataset,
+                                                     inverse_to_initial_domain_fn=inverse_to_initial_domain_fn)
                         log_metric(metric, results=metrics_results, logger=logger, period='epoch', period_index=epoch)
                     logger.commit(period='epoch')
                 epoch += 1

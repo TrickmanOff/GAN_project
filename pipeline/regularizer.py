@@ -1,6 +1,8 @@
 from abc import abstractmethod
 from typing import Callable
 
+import torch
+
 
 class Regularizer:
     """
@@ -13,15 +15,15 @@ class Regularizer:
         pass
 
     @abstractmethod
-    def __call__(self) -> float:
+    def __call__(self) -> torch.Tensor:
         pass
 
 
 class BasicRegularizer(Regularizer):
-    def __init__(self, func: Callable[[], float]) -> None:
+    def __init__(self, func: Callable[[], torch.Tensor]) -> None:
         self._func = func
 
-    def __call__(self) -> float:
+    def __call__(self) -> torch.Tensor:
         return self._func()
 
 
@@ -30,10 +32,10 @@ class NoPenaltyIntervalRegularizer(Regularizer):
         self.inner_regularizer = regularizer
         self.lim = lim
 
-    def __call__(self) -> float:
+    def __call__(self) -> torch.Tensor:
         val = self.inner_regularizer()
         if val < self.lim:
-            return 0
+            return torch.tensor(0.)
         else:
             return val - self.lim
 
@@ -43,7 +45,7 @@ class PowRegularizer(Regularizer):
         self.inner_regularizer = regularizer
         self.pow = pow
 
-    def __call__(self) -> float:
+    def __call__(self) -> torch.Tensor:
         return self.inner_regularizer() ** self.pow
 
 
@@ -60,7 +62,7 @@ class MultiplierRegularizer(Regularizer):
     def step(self) -> None:
         self.multiplier += self.add_value
 
-    def __call__(self) -> float:
+    def __call__(self) -> torch.Tensor:
         return self.multiplier * self.inner_regularizer()
 
 

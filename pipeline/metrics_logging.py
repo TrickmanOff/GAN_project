@@ -117,5 +117,18 @@ def log_metric(metric: Metric, results: Any, logger: GANLogger, period: str, per
             data[metric.NAME + ' prod'] = np.prod(results)
 
         logger.log_metrics(data=data, period=period, period_index=period_index, commit=False)
+    elif isinstance(metric, CriticValuesStats) or isinstance(metric, GeneratorValuesStats):
+        if isinstance(metric, CriticValuesStats):
+            part = 'discriminator'
+            prefixes = ['val', 'gen']
+        else:
+            part = 'generator'
+            prefixes = ['gen']
+            results = (results,)
+        data = {}
+        for stats, prefix in zip(results, prefixes):
+            for stat_name, stat_val in stats.items():
+                data[f'train/{part}/{prefix}_{stat_name}'] = stat_val
+        logger.log_metrics(data=data, period=period, period_index=period_index, commit=False)
     else:
         raise NotImplementedError(f'Metric "{type(metric)}" is not supported for logging')

@@ -285,6 +285,59 @@ class CriticValuesDistributionMetric(DataMetric):
         return torch.cat(critic_vals_gen).flatten().cpu().numpy(), torch.cat(critic_vals_true).flatten().cpu().numpy()
 
 
+# статистики значений дискриминатора (для дебага при падении во время обучении)
+class CriticValuesStats(DataMetric):
+    def __init__(self, values_cnt: int):
+        super().__init__(initial_domain_data=False,
+                         val_data_size=values_cnt,
+                         gen_data_size=values_cnt,
+                         cache_val_data=False,
+                         shuffle_val_dataset=True,
+                         return_as_batches=True)
+
+    def evaluate(self, gan_model: GAN, gen_data, val_data, **kwargs) -> Tuple[Dict, Dict]:
+        """
+        :return: {min, max, mean} for validation data, {min, max, mean} for generated data
+        """
+        res = []
+        for data in (val_data, gen_data):
+            all_critic_vals = []
+            with torch.no_grad():
+                for batch in data:
+                    batch_x, batch_y = move_batch_to(batch, get_local_device())
+                    critic_vals = gan_model.discriminator(batch_x, batch_y)
+                    all_critic_vals.append(critic_vals)
+            all_critic_vals = torch.cat(all_critic_vals)
+            stats = {
+                'min': all_critic_vals.min().item(),
+                'max': all_critic_vals.max().item(),
+                'mean': all_critic_vals.mean().item(),
+            }
+            res.append(stats)
+        return tuple(res)
+
+
+class GeneratorValuesStats(DataMetric):
+    def __init__(self, values_cnt: int):
+        super().__init__(initial_domain_data=False,
+                         val_data_size=values_cnt,
+                         gen_data_size=values_cnt,
+                         cache_val_data=False,
+                         shuffle_val_dataset=True,
+                         return_as_batches=False)
+
+    def evaluate(self, gan_model: GAN, gen_data, val_data, **kwargs) -> Dict:
+        """
+        :return: {min, max, mean} for generated data
+        """
+        stats = {
+            'min': gen_data[0].min().item(),
+            'max': gen_data[0].max().item(),
+            'mean': gen_data[0].mean().item(),
+        }
+        return stats
+
+
 class DataStatistic(DataMetric):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -625,4 +678,5 @@ __all__ = ['Metric', 'CriticValuesDistributionMetric',
            'DataStatisticsCombiner',
            'PHYS_STATISTICS',
            'BetaMetric', 'DiscriminatorParameterMetric', 'GeneratorParameterMetric',
-           'GeneratorAttributeMetric', 'DiscriminatorAttributeMetric']
+           'GeneratorAttributeMetric', 'DiscriminatorAttributeMetric',
+           'CriticValuesStats', 'GeneratorValuesStats']
