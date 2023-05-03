@@ -14,12 +14,13 @@ It is expected to be provided if the existing logging interface shows its conven
 class LoggerConfig:
     ignored_periods: Optional[Set[str]] = None
     ignored_metrics: Optional[Set[str]] = None
+    periodic_periods: Optional[Dict[str, int]] = None
     # TODO: добавить возможность отключить логирование training_stats
 
 
 def get_default_config() -> LoggerConfig:
     return LoggerConfig(
-        ignored_periods={'batch'}
+        ignored_periods={'gen_batch', 'disc_batch'}
     )
 
 
@@ -83,6 +84,10 @@ class GANLogger:
         use commit=True only for the last call for the pair (period, period_index)
         """
         if self.config.ignored_periods and period in self.config.ignored_periods:
+            return
+
+        if self.config.periodic_periods and period in self.config.periodic_periods and \
+           (period_index % self.config.periodic_periods[period]) != 0:
             return
 
         if self.config.ignored_metrics is not None:

@@ -70,10 +70,26 @@ class GanEpochTrainer(ABC):
         pass
 
 
+def check_tensor(x: torch.Tensor, prefix: str = ''):
+    msg = prefix
+    if x.isnan().any():
+        msg += 'NaNs'
+    elif x.isinf().any():
+        msg += '+infs'
+    elif x.isneginf().any():
+        msg += '-infs'
+    else:
+        return
+    raise ValueError(msg)
+
+
 class WganEpochTrainer(GanEpochTrainer):
     def __init__(self, n_critic: int = 5, batch_size: int = 64) -> None:
         self.n_critic = n_critic
         self.batch_size = batch_size
+        # probably, these counters should be moved to logger
+        self.gen_batch_cnt = 0
+        self.disc_batch_cnt = 0
 
     def train_epoch(self, gan_model: GAN,
                     train_dataset: torch.utils.data.Dataset, val_dataset: torch.utils.data.Dataset,
@@ -104,10 +120,14 @@ class WganEpochTrainer(GanEpochTrainer):
             # critic training
             gan_model.generator.requires_grad_(False)
             for t in range(self.n_critic):
+                self.disc_batch_cnt += 1
                 real_batch = next(random_dataloader_iter)
                 gen_batch_x, real_batch_x, gen_batch_y, real_batch_y = get_batches(real_batch)
+                check_tensor(gen_batch_x, 'Generated values contain ')
                 disc_real_vals = gan_model.discriminator(real_batch_x, real_batch_y)
+                check_tensor(disc_real_vals, 'Discriminator values for real data contain ')
                 disc_gen_vals = gan_model.discriminator(gen_batch_x, gen_batch_y)
+                check_tensor(disc_gen_vals, 'Discriminator values for generated data contain ')
                 loss = - (disc_real_vals - disc_gen_vals).mean()
                 if regularizer is not None:
                     regularizer_loss = regularizer()
@@ -115,13 +135,15 @@ class WganEpochTrainer(GanEpochTrainer):
                     if logger is not None:
                         logger.log_metrics(data={'train/discriminator/pure_loss': loss.item(),
                                                  'train/discriminator/reg_loss': regularizer_loss.item()},
-                                           period='batch', period_index=t+1, commit=False)
+                                           period='disc_batch', period_index=self.disc_batch_cnt, commit=False)
                     loss += regularizer_loss
-                if logger is not None:
-                    logger.log_metrics(data={'train/discriminator/loss': loss.item()},
-                                       period='batch', period_index=t+1, commit=True)
                 loss.backward()
-                disc_grad_norm_total += calc_grad_norm(gan_model.discriminator)
+                disc_grad_norm = calc_grad_norm(gan_model.discriminator)
+                disc_grad_norm_total += disc_grad_norm
+                if logger is not None:
+                    logger.log_metrics(data={'train/discriminator/batch_loss': loss.item(),
+                                             'train/discriminator/batch_grad_norm': disc_grad_norm},
+                                       period='disc_batch', period_index=self.disc_batch_cnt, commit=True)
                 critic_stepper.step()
                 critic_stepper.optimizer.zero_grad()
                 update_normalizers_stats(gan_model.discriminator, disc_real_vals=disc_real_vals,
@@ -138,25 +160,28 @@ class WganEpochTrainer(GanEpochTrainer):
             observations = (gan_model.discriminator(real_batch_x, real_batch_y) -
                             gan_model.discriminator(gen_batch_x, gen_batch_y))
             gen_loss = observations.mean()
+            self.gen_batch_cnt += 1
             if regularizer is not None:
                 regularizer_loss = regularizer()
                 regularizer_loss_total += regularizer_loss.item()
                 if logger is not None:
                     logger.log_metrics(data={'train/generator/pure_loss': gen_loss.item(),
                                              'train/generator/reg_loss': regularizer_loss.item()},
-                                       period='batch', period_index=batch_index+1, commit=False)
+                                       period='gen_batch', period_index=self.gen_batch_cnt, commit=False)
                 gen_loss += regularizer_loss
                 regularizer.step()
             gen_loss_total += gen_loss * len(gen_batch_x)
             gen_loss.backward()
-            gen_grad_norm_total += calc_grad_norm(gan_model.generator)
+            gen_grad_norm = calc_grad_norm(gan_model.generator)
+            gen_grad_norm_total += gen_grad_norm
             generator_stepper.step()
             generator_stepper.optimizer.zero_grad()
             gan_model.discriminator.requires_grad_(True)
 
             if logger is not None:
-                logger.log_metrics(data={'train/generator/loss': gen_loss.item()},
-                                   period='batch', period_index=batch_index+1, commit=False)
+                logger.log_metrics(data={'train/generator/batch_loss': gen_loss.item(),
+                                         'train/generator/batch_grad_norm': gen_grad_norm},
+                                   period='gen_batch', period_index=self.gen_batch_cnt, commit=True)
 
         generator_stepper.epoch_finished()
         critic_stepper.epoch_finished()
@@ -178,7 +203,7 @@ class WganEpochTrainer(GanEpochTrainer):
             logger.log_metrics(data={'train/critic/loss': critic_loss_total / len(train_dataset),
                                      'train/generator/loss': gen_loss_total / len(train_dataset),
                                      'train/regularizer/loss': regularizer_loss_total / (len(dataloader) * (self.n_critic + 1)),
-                                     'train/critic/grad_norm': disc_grad_norm_total / len(dataloader) * self.n_critic,
+                                     'train/discriminator/grad_norm': disc_grad_norm_total / len(dataloader) * self.n_critic,
                                      'train/generator/grad_norm': gen_grad_norm_total / len(dataloader)},
                                period='epoch',
                                commit=False)  # period_index was specified by the caller

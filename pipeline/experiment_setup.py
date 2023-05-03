@@ -2,9 +2,11 @@
 Local config which is the same for all experiments running in the environment
 """
 import contextlib
+from typing import Optional
 
 from pipeline import logger
 from pipeline.config import load_global_config
+from pipeline.logger import LoggerConfig
 from pipeline.storage import ExperimentsStorage
 from pipeline.wandb_logger import WandbCM
 
@@ -25,11 +27,11 @@ def init_storage() -> ExperimentsStorage:
 experiments_storage = init_storage()
 
 
-def init_logger(model_name: str = ''):
+def init_logger(model_name: str = '', config: Optional[LoggerConfig] = None):
     if not global_config.logger.enable_logging:
         return None
     project_name = global_config.logger.project_name
-    config = logger.get_default_config()
+    config = config or logger.get_default_config()
     @contextlib.contextmanager
     def logger_cm():
         try:

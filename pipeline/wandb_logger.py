@@ -156,7 +156,7 @@ class WandbCM:
             name=self.experiment_id,
             # resume='allow',
         )
-        return _WandbLogger(wandb_run=run)
+        return _WandbLogger(config=self.config, wandb_run=run)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         wandb.finish()
