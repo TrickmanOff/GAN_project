@@ -43,6 +43,13 @@ from __future__ import print_function
 from matplotlib import pyplot as plt
 import numpy as np
 import sklearn.cluster
+try:
+    import cuml.cluster
+except ModuleNotFoundError:
+    pass
+
+
+import sys
 
 
 def compute_prd(eval_dist, ref_dist, num_angles=1001, epsilon=1e-10):
@@ -105,7 +112,7 @@ def compute_prd(eval_dist, ref_dist, num_angles=1001, epsilon=1e-10):
   return precision, recall
 
 
-def _cluster_into_bins(eval_data, ref_data, num_clusters):
+def _cluster_into_bins(eval_data, ref_data, num_clusters, use_cuml: bool = False):
   """Clusters the union of the data points and returns the cluster distribution.
 
   Clusters the union of eval_data and ref_data into num_clusters using minibatch
@@ -121,9 +128,13 @@ def _cluster_into_bins(eval_data, ref_data, num_clusters):
     Two NumPy arrays, each of size num_clusters, where i-th entry represents the
     number of points assigned to the i-th cluster.
   """
+  use_cuml = use_cuml and 'cuml.cluster' in sys.modules
 
   cluster_data = np.vstack([eval_data, ref_data])
-  kmeans = sklearn.cluster.MiniBatchKMeans(n_clusters=num_clusters, n_init=10)
+  if use_cuml:
+    kmeans = cuml.cluster.KMeans(n_clusters=num_clusters, n_init=10)
+  else:
+    kmeans = sklearn.cluster.MiniBatchKMeans(n_clusters=num_clusters, n_init=10)
   labels = kmeans.fit(cluster_data).labels_
 
   eval_labels = labels[:len(eval_data)]

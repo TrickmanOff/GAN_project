@@ -445,6 +445,11 @@ class ClusterTransverseWidthMetric(PhysicsDataStatistic):
 class PhysicsPRDMetric(PhysicsDataStatistic):
     NAME = 'PRD'
 
+    def __init__(self, num_clusters: int = 20, num_runs: int = 10):
+        super().__init__()
+        self.num_clusters = num_clusters
+        self.num_runs = num_runs
+
     def evaluate(self, gen_data: Any, val_data, **kwargs) -> Tuple[Any, Any]:
         """
         :param gen_data:
@@ -452,19 +457,26 @@ class PhysicsPRDMetric(PhysicsDataStatistic):
         takes X as embedding
         """
         precisions, recalls = calogan_prd.calc_pr_rec_from_embeds(data_real_embeds=val_data[0],
-                                                                  data_fake_embeds=gen_data[0])
+                                                                  data_fake_embeds=gen_data[0],
+                                                                  num_clusters=self.num_clusters,
+                                                                  num_runs=self.num_runs)
         return precisions, recalls
 
 
 class AveragePRDAUCMetric(PhysicsDataStatistic):
     NAME = 'Average PRD-AUC'
 
+    def __init__(self, num_clusters: int = 20, num_runs: int = 10):
+        super().__init__()
+        self.num_clusters = num_clusters
+        self.num_runs = num_runs
+
     def evaluate(self, gen_data: Any,
                  val_data: Optional[Any] = None,
                  **kwargs):
         if gen_data[0] is None or val_data[0] is None:
             return 0.  # zero recall or zero precision respectively
-        precisions, recalls = PhysicsPRDMetric().evaluate(gen_data=gen_data, val_data=val_data)
+        precisions, recalls = PhysicsPRDMetric(num_clusters=self.num_clusters, num_runs=self.num_runs).evaluate(gen_data=gen_data, val_data=val_data)
         pr_aucs = plot_pr_aucs(precisions=precisions, recalls=recalls)
         plt.close()
         return np.mean(pr_aucs)

@@ -4,8 +4,8 @@ from pipeline.metrics import *
 from pipeline.physical_metrics.calogan_prd import get_energy_embedding
 
 
-def create_prd_energy_embed():
-    calculated_metric = PhysicsPRDMetric()
+def create_prd_energy_embed(num_clusters: int = 20, num_runs: int = 10):
+    calculated_metric = PhysicsPRDMetric(num_clusters=num_clusters, num_runs=num_runs)
     calculated_metric.NAME = 'Energy ' + calculated_metric.NAME
 
     metric = TransformData(
@@ -15,8 +15,8 @@ def create_prd_energy_embed():
     return metric
 
 
-def create_conditional_prd_energy_embed():
-    calculated_metric = AveragePRDAUCMetric()
+def create_conditional_prd_energy_embed(num_clusters: int = 20, num_runs: int = 10):
+    calculated_metric = AveragePRDAUCMetric(num_clusters=num_clusters, num_runs=num_runs)
     calculated_metric.NAME = 'Energy embed. ' + calculated_metric.NAME
 
     metric = TransformData(
@@ -30,8 +30,8 @@ def create_conditional_prd_energy_embed():
     return metric
 
 
-def create_prd_physics_statistics():
-    calculated_metric = PhysicsPRDMetric()
+def create_prd_physics_statistics(num_clusters: int = 20, num_runs: int = 10):
+    calculated_metric = PhysicsPRDMetric(num_clusters=num_clusters, num_runs=num_runs)
     calculated_metric.NAME = 'PhysStats ' + calculated_metric.NAME
 
     metric = TransformData(
@@ -43,8 +43,8 @@ def create_prd_physics_statistics():
     return metric
 
 
-def create_conditional_prd_physics_statistics():
-    calculated_metric = AveragePRDAUCMetric()
+def create_conditional_prd_physics_statistics(num_clusters: int = 20, num_runs: int = 10):
+    calculated_metric = AveragePRDAUCMetric(num_clusters=num_clusters, num_runs=num_runs)
     calculated_metric.NAME = 'PhysStats ' + calculated_metric.NAME
 
     metric = TransformData(
