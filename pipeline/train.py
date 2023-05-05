@@ -109,11 +109,14 @@ class WganEpochTrainer(GanEpochTrainer):
 
             return gen_batch_x, real_batch_x, gen_batch_y, real_batch_y
 
+        critic_adv_loss_total = 0.
         critic_loss_total = 0.
+        gen_adv_loss_total = 0.
         gen_loss_total = 0.
         regularizer_loss_total = 0.
         disc_grad_norm_total = 0.
         gen_grad_norm_total = 0.
+        
         # generator_batch = next(random_dataloader_iter)  # for local testing
         # for batch_index in range(1):                    # -----------------
         for batch_index, generator_batch in enumerate(tqdm(dataloader)):
@@ -129,6 +132,7 @@ class WganEpochTrainer(GanEpochTrainer):
                 disc_gen_vals = gan_model.discriminator(gen_batch_x, gen_batch_y)
                 check_tensor(disc_gen_vals, 'Discriminator values for generated data contain ')
                 loss = - (disc_real_vals - disc_gen_vals).mean()
+                critic_adv_loss_total += loss.item() * len(gen_batch_x)
                 if regularizer is not None:
                     regularizer_loss = regularizer()
                     regularizer_loss_total += regularizer_loss.item()
@@ -149,7 +153,7 @@ class WganEpochTrainer(GanEpochTrainer):
                 update_normalizers_stats(gan_model.discriminator, disc_real_vals=disc_real_vals,
                                          disc_gen_vals=disc_gen_vals)
 
-            critic_loss_total += loss.item() * len(gen_batch_x)
+            critic_loss_total += loss.item() * len(gen_batch_x)  # intentionally not in 'for' loop
 
             gan_model.generator.requires_grad_(True)
 
@@ -161,6 +165,7 @@ class WganEpochTrainer(GanEpochTrainer):
                             gan_model.discriminator(gen_batch_x, gen_batch_y))
             gen_loss = observations.mean()
             self.gen_batch_cnt += 1
+            gen_adv_loss_total += gen_loss.item() * len(gen_batch_x)
             if regularizer is not None:
                 regularizer_loss = regularizer()
                 regularizer_loss_total += regularizer_loss.item()
@@ -201,7 +206,9 @@ class WganEpochTrainer(GanEpochTrainer):
                     commit=False)
 
             logger.log_metrics(data={'train/critic/loss': critic_loss_total / len(train_dataset),
+                                     'train/critic/adv_loss': critic_adv_loss_total / len(train_dataset),
                                      'train/generator/loss': gen_loss_total / len(train_dataset),
+                                     'train/generator/adv_loss': gen_adv_loss_total / len(train_dataset),
                                      'train/regularizer/loss': regularizer_loss_total / (len(dataloader) * (self.n_critic + 1)),
                                      'train/discriminator/grad_norm': disc_grad_norm_total / len(dataloader) * self.n_critic,
                                      'train/generator/grad_norm': gen_grad_norm_total / len(dataloader)},
