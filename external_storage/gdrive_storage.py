@@ -1,6 +1,5 @@
 """
 Class for importing and exporting models from Google Drive.
-Only for local use as the library `pydrive` is not allowed in the task.
 """
 import os
 import shutil

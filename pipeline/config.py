@@ -12,7 +12,9 @@ except ImportError:
 CONFIGS_DIR = './config'
 
 """
+Used config-files:
 paths.yaml
+logger.yaml
 """
 
 
