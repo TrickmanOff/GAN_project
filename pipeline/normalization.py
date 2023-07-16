@@ -164,30 +164,6 @@ class WeakSpectralNormalizer(Normalizer):
         self.module = apply_normalization(self.module, SpectralNormalizer, beta=self.beta)
 
 
-# https://arxiv.org/pdf/2211.06595v1.pdf
-class ABCASNormalizer(Normalizer):
-    def __init__(self, module: T, b: float = 4., alpha: float = 0.9999, m_const: float = 0.9,
-                 r_start: float = 0.) -> None:
-        super().__init__(module=module)
-        self.b = b   # beta in the paper
-        self.r = r_start  # this value is not used
-        self.register_buffer('dm', torch.tensor(r_start))
-        self.alpha = alpha
-        self.module = apply_normalization(module, SpectralNormalizer)
-        self.m_const = m_const
-
-    def forward(self, X: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-        m = self.m_const ** self.r
-        return self.module(X, *args, **kwargs) * m
-
-    def update_stats(self, disc_real_vals: torch.Tensor, disc_gen_vals: torch.Tensor, **kwargs) -> None:
-        super().update_stats()
-        dist = (disc_real_vals.max() - disc_gen_vals.min()).item()
-        self.dm = self.alpha * self.dm + (1 - self.alpha) * dist
-        clbr_dm = self.dm / self.b
-        self.r = max(0., clbr_dm / (1 - clbr_dm))
-
-
 class MultiplyOutputNormalizer(Normalizer):
     def __init__(self, module: T, coef: float = 1., is_trainable_coef: bool = False):
         super().__init__(module)
@@ -313,10 +289,8 @@ class MultiplyLayersOutputNormalizer(Normalizer):
         coefs = torch.full((len(layers),), init_coef)
         if is_trainable_coef:
             self.coefs = nn.Parameter(coefs, requires_grad=True)
-            coefs = self.coefs
         else:
             self.register_buffer('coefs', coefs)
-            coefs = self.coefs
 
         _appl_cnt = 0
 
@@ -356,3 +330,28 @@ def update_normalizers_stats(module: nn.Module, **kwargs):
     for name, submodule in module.named_modules():
         if isinstance(submodule, Normalizer):
             submodule.update_stats(**kwargs)
+
+
+from pipeline.device import get_local_device
+
+# https://arxiv.org/pdf/2211.06595v1.pdf
+class ABCASNormalizer(MultiplyLayersOutputNormalizer):
+    def __init__(self, module: T, b: float = 4., alpha: float = 0.9999, m_const: float = 0.9,
+                 r_start: float = 0.) -> None:
+        module = apply_normalization(module, SpectralNormalizer)
+        super().__init__(module=module, num_layers=-1, multiplied_layer_types=[nn.Linear, nn.Conv2d],
+                         layers=None, init_coef=1., is_trainable_coef=False)
+        self.b = b   # beta in the paper
+        self.r = r_start  # this value is not used
+        self.register_buffer('dm', torch.tensor(r_start))
+        self.alpha = alpha
+        self.m_const = m_const
+
+    def update_stats(self, disc_real_vals: torch.Tensor, disc_gen_vals: torch.Tensor, **kwargs) -> None:
+        super().update_stats()
+        dist = (disc_real_vals.max() - disc_gen_vals.min()).item()
+        self.dm = self.alpha * self.dm + (1 - self.alpha) * dist
+        clbr_dm = self.dm / self.b
+        self.r = max(0., clbr_dm / (1 - clbr_dm))
+        m = self.m_const ** self.r
+        self.coefs.fill_(m)
