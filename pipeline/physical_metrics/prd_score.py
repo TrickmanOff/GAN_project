@@ -185,6 +185,8 @@ def compute_prd_from_embedding(eval_data, ref_data, num_clusters=20,
                 True.
   """
 
+  num_clusters = min(num_clusters, len(eval_data), len(ref_data))
+
   if enforce_balance and len(eval_data) != len(ref_data):
     raise ValueError(
         'The number of points in eval_data %d is not equal to the number of '

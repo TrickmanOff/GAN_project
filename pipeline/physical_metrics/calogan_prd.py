@@ -96,7 +96,8 @@ def check_tensor_is_finite(t: np.ndarray) -> torch.Tensor:
 
 
 def calc_pr_rec_from_embeds(data_real_embeds: np.ndarray, data_fake_embeds: np.ndarray, num_clusters=20, num_runs=10, NUM_RUNS=10,
-                            show_progress_bar: bool = False) -> Tuple[List[np.ndarray], List[np.ndarray]]:
+                            show_progress_bar: bool = False,
+                            enforce_balance: bool = True) -> Tuple[List[np.ndarray], List[np.ndarray]]:
     data_real_embeds = check_tensor_is_finite(data_real_embeds)
     data_fake_embeds = check_tensor_is_finite(data_fake_embeds)
 
@@ -104,7 +105,8 @@ def calc_pr_rec_from_embeds(data_real_embeds: np.ndarray, data_fake_embeds: np.n
     recalls = []
     for _ in tqdm(range(NUM_RUNS)) if show_progress_bar else range(NUM_RUNS):
         precision, recall = compute_prd_from_embedding(data_real_embeds, data_fake_embeds,
-                                                       num_clusters=num_clusters, num_runs=num_runs)
+                                                       num_clusters=num_clusters, num_runs=num_runs,
+                                                       enforce_balance=enforce_balance)
         precisions.append(precision)
         recalls.append(recall)
     return precisions, recalls

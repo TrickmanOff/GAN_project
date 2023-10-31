@@ -445,10 +445,11 @@ class ClusterTransverseWidthMetric(PhysicsDataStatistic):
 class PhysicsPRDMetric(PhysicsDataStatistic):
     NAME = 'PRD'
 
-    def __init__(self, num_clusters: int = 20, num_runs: int = 10):
+    def __init__(self, num_clusters: int = 20, num_runs: int = 10, enforce_balance: bool = True):
         super().__init__()
         self.num_clusters = num_clusters
         self.num_runs = num_runs
+        self.enforce_balance = enforce_balance
 
     def evaluate(self, gen_data: Any, val_data, **kwargs) -> Tuple[Any, Any]:
         """
@@ -459,24 +460,27 @@ class PhysicsPRDMetric(PhysicsDataStatistic):
         precisions, recalls = calogan_prd.calc_pr_rec_from_embeds(data_real_embeds=val_data[0],
                                                                   data_fake_embeds=gen_data[0],
                                                                   num_clusters=self.num_clusters,
-                                                                  num_runs=self.num_runs)
+                                                                  num_runs=self.num_runs,
+                                                                  enforce_balance=self.enforce_balance)
         return precisions, recalls
 
 
 class AveragePRDAUCMetric(PhysicsDataStatistic):
     NAME = 'Average PRD-AUC'
 
-    def __init__(self, num_clusters: int = 20, num_runs: int = 10):
+    def __init__(self, num_clusters: int = 20, num_runs: int = 10, enforce_balance: bool = True):
         super().__init__()
         self.num_clusters = num_clusters
         self.num_runs = num_runs
+        self.enforce_balance = enforce_balance
 
     def evaluate(self, gen_data: Any,
                  val_data: Optional[Any] = None,
                  **kwargs):
         if gen_data[0] is None or val_data[0] is None:
             return 0.  # zero recall or zero precision respectively
-        precisions, recalls = PhysicsPRDMetric(num_clusters=self.num_clusters, num_runs=self.num_runs).evaluate(gen_data=gen_data, val_data=val_data)
+        precisions, recalls = PhysicsPRDMetric(num_clusters=self.num_clusters, num_runs=self.num_runs, enforce_balance=self.enforce_balance)\
+            .evaluate(gen_data=gen_data, val_data=val_data)
         pr_aucs = plot_pr_aucs(precisions=precisions, recalls=recalls)
         plt.close()
         return np.mean(pr_aucs)
@@ -563,6 +567,9 @@ def split_into_bins(data: Union[torch.Tensor, Tuple[torch.Tensor]], condition_da
     all_indices = torch.arange(len(condition_data))
     for bin_index in range(max_bin_index):
         cur_indices = all_indices[bins_codes == bin_index]
+        if len(cur_indices) == 1:  # for torch 2.*.*
+            cur_indices = [cur_indices.item()]
+
         if len(cur_indices) == 0:
             cur_bin = None
         else:
@@ -592,20 +599,24 @@ class ConditionBinsMetric(Metric):
         return self.metric.prepare_args(**kwargs)
 
     def evaluate(self, gen_data, val_data, **kwargs):
-        gen_x, val_x = gen_data[0], val_data[0]
-        val_y = val_data[1]
-        if isinstance(val_y, tuple):
-            split_condition = val_y[self.condition_index]
-        else:
-            split_condition = val_y
-        splitted_data = split_into_bins((gen_x, val_x, val_y), condition_data=split_condition,
-                                        dim_bins=self.dim_bins)
+        gen_y, val_y = gen_data[1], val_data[1]
+
+        gen_splitted_data = split_into_bins(gen_data, condition_data=self._get_split_condition(gen_y),
+                                            dim_bins=self.dim_bins)
+        val_splitted_data = split_into_bins(val_data, condition_data=self._get_split_condition(val_y),
+                                            dim_bins=self.dim_bins)
 
         results = []
-        for gen_bin, val_bin, y_bin in tqdm(splitted_data):
-            metric_result = self.metric.evaluate(gen_data=(gen_bin, y_bin), val_data=(val_bin, y_bin))
+        for gen_bin, val_bin in tqdm(zip(gen_splitted_data, val_splitted_data)):
+            metric_result = self.metric.evaluate(gen_data=gen_bin, val_data=val_bin)
             results.append(metric_result)
         return results
+
+    def _get_split_condition(self, y):
+        if isinstance(y, tuple):
+            return y[self.condition_index]
+        else:
+            return y
 
 
 def _split_into_bins(bins, vals):
